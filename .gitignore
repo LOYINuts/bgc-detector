@@ -1,0 +1,20 @@
+# Generated data (embeddings, catalogs, windows) — never commit
+data/derived/
+data/raw/
+*.parquet
+*.pt
+*.npy
+*.log
+_smoke/
+
+# Run outputs
+runs/
+checkpoints*/
+pretrain/
+reports/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
