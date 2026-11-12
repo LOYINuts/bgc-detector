@@ -24,6 +24,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
+from torch.nn.attention import SDPBackend, sdpa_kernel
 from bgc_gnn.dataset import normalize_strand, normalize_translation
 
 # HF-native weights, rotary (no length cap). Override for ESMC-600M:
@@ -164,7 +165,9 @@ def run(
         enc = tokenizer(batch_inputs, return_tensors="pt", padding=True)
         input_ids = enc["input_ids"].to(device)
         attn = enc["attention_mask"].to(device)
-        with torch.inference_mode():
+        with torch.inference_mode(), sdpa_kernel([
+            SDPBackend.EFFICIENT_ATTENTION, SDPBackend.FLASH_ATTENTION, SDPBackend.MATH,
+        ]):
             out = model_obj(input_ids=input_ids, attention_mask=attn)
         hidden = out.last_hidden_state  # [B, T, D]
 

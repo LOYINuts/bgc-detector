@@ -76,7 +76,12 @@ run_one() {  # <seed> <gpu>
         pretrained=${PRETRAIN_REUSE//\{seed\}/$seed}/pretrained_best.pt
         [ -f "$pretrained" ] || { echo "[gpu $gpu] seed=$seed: missing $pretrained"; return 1; }
     elif [ "$PRETRAIN" = "1" ]; then
-        if [ ! -f "$pt_dir/status.json" ] || ! grep -q completed "$pt_dir/status.json"; then
+        if [ -f "$pt_dir/status.json" ] && grep -q completed "$pt_dir/status.json"; then
+            :
+        elif [ -d "$pt_dir" ]; then
+            echo "[gpu $gpu] seed=$seed: $pt_dir exists but is not completed; use a fresh PRETRAIN_DIR"
+            return 1
+        else
             mkdir -p "$pt_dir"
             echo "[gpu $gpu] seed=$seed: weak pretraining -> $pt_dir"
             uv run python -u -m bgc_gnn.pretrain \

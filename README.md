@@ -122,6 +122,14 @@ produces bit-identical predictions.
 
 ## Requirements
 
-Python ≥ 3.12, CUDA build of torch for training, `esm` package (biohub) for ESMC
-encoding, antiSMASH 8 for the GTDB annotation and external comparison data.
+Installed by `uv sync` (see `pyproject.toml`): Python ≥ 3.12, PyTorch (CUDA build
+for training), pyarrow, numpy, scikit-learn, biopython, tqdm.
+
+Installed separately, not in `pyproject.toml`:
+
+- `esm` (biohub) — needed only by `scripts/encode.py` and
+  `scripts/encode_pretraining.py` to run ESMC-300M locally
+  (`uv pip install esm`).
+- antiSMASH 8 — needed to annotate GTDB genomes and for the external comparison.
+
 Raw genomes, antiSMASH output and derived parquet files are not tracked.

@@ -166,6 +166,9 @@ def main():
 
     detector = BGCProphetDetector(
         d_model=EMBEDDING_DIM, num_layers=2, nhead=15, input_dim=EMBEDDING_DIM,
+        # No semantic skip: the transferred checkpoint carries encoder + head only,
+        # and the zero-initialized skip is added by the downstream detector.
+        semantic_skip=False,
     ).to(device)
     train_loader = DataLoader(train, batch_size=a.batch_size, shuffle=True)
     val_loader = DataLoader(val, batch_size=a.batch_size)
@@ -182,7 +185,7 @@ def main():
             "model": "bgcp", "arch": "channel_gated_conv_gru",
             "input_dim": EMBEDDING_DIM, "d_model": EMBEDDING_DIM,
             "num_layers": 2, "nhead": 15, "input_norm": True,
-            "kernel_size": 5, "semantic_skip": True, "context_readout": False,
+            "kernel_size": 5, "semantic_skip": False, "context_readout": False,
             "window_size": WINDOW_SIZE,
         },
         "settings": {k: str(v) if isinstance(v, Path) else v for k, v in vars(a).items()},
