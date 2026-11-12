@@ -89,7 +89,7 @@ class ChannelGatedConvGRUBlock(nn.Module):
         return self.gru(x, key_padding_mask)
 
 
-class BGCProphetDetector(nn.Module):
+class BGCDetector(nn.Module):
     """Per-gene BGC probability, final recipe (2 layers, 960d, k=5)."""
 
     def __init__(

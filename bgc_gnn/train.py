@@ -44,7 +44,7 @@ from bgc_gnn.checkpoint import (
 )
 from bgc_gnn.dataset import EmbeddingStore, FixedBGCDataset, collate_detect_batch
 from bgc_gnn.eval import compute_detect_metrics, select_detection_threshold
-from bgc_gnn.model import WINDOW_SIZE, BGCProphetDetector
+from bgc_gnn.model import WINDOW_SIZE, BGCDetector
 
 BATCH_SIZE = 64
 LR = 5e-4
@@ -159,8 +159,8 @@ def build_optimizer(model: torch.nn.Module, encoder_lr_scale: float) -> AdamW:
     ], lr=LR, weight_decay=WEIGHT_DECAY)
 
 
-def build_model(context_readout: bool, embedding_dim: int) -> BGCProphetDetector:
-    return BGCProphetDetector(
+def build_model(context_readout: bool, embedding_dim: int) -> BGCDetector:
+    return BGCDetector(
         d_model=D_MODEL,
         nhead=NHEAD,
         num_layers=NUM_LAYERS,
@@ -237,7 +237,7 @@ def main() -> None:
     print(f"  Train samples/epoch: {len(train_ds):,}  Val: {len(val_ds):,}")
 
     model = build_model(args.context_readout, embedding_dim).to(device)
-    print(f"BGCProphetDetector: {sum(p.numel() for p in model.parameters())/1e6:.2f}M parameters")
+    print(f"BGCDetector: {sum(p.numel() for p in model.parameters())/1e6:.2f}M parameters")
 
     metadata = {
         "metadata_version": 1,
@@ -245,7 +245,7 @@ def main() -> None:
         "runtime": runtime_metadata(),
         "embedding": file_fingerprint(args.emb_path),
         "architecture": {
-            "model": "bgcp",
+            "model": "convgru",
             "arch": "channel_gated_conv_gru",
             "d_model": D_MODEL,
             "nhead": NHEAD,

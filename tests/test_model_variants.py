@@ -6,21 +6,21 @@ import torch
 
 from bgc_gnn import train
 from bgc_gnn.checkpoint import detector_settings, initialize_from_pretraining, load_checkpoint, save_checkpoint
-from bgc_gnn.model import BGCProphetDetector
+from bgc_gnn.model import BGCDetector
 
 
-def small_model(**kwargs) -> BGCProphetDetector:
+def small_model(**kwargs) -> BGCDetector:
     torch.manual_seed(7)
-    return BGCProphetDetector(input_dim=8, d_model=8, nhead=2, num_layers=2, **kwargs)
+    return BGCDetector(input_dim=8, d_model=8, nhead=2, num_layers=2, **kwargs)
 
 
 class SemanticSkipTest(unittest.TestCase):
     def test_zero_initialization_matches_seeded_baseline(self):
         torch.manual_seed(7)
-        baseline = BGCProphetDetector(input_dim=8, d_model=8, nhead=2, num_layers=2,
+        baseline = BGCDetector(input_dim=8, d_model=8, nhead=2, num_layers=2,
                                       semantic_skip=False)
         torch.manual_seed(7)
-        skip = BGCProphetDetector(input_dim=8, d_model=8, nhead=2, num_layers=2)
+        skip = BGCDetector(input_dim=8, d_model=8, nhead=2, num_layers=2)
         baseline.eval(); skip.eval()
         for name, tensor in baseline.state_dict().items():
             torch.testing.assert_close(tensor, skip.state_dict()[name], rtol=0, atol=0)
@@ -97,7 +97,7 @@ class ContextReadoutTest(unittest.TestCase):
                 },
             })
             state, metadata = load_checkpoint(path, 'cpu')
-            restored = BGCProphetDetector(**detector_settings(metadata, 8)).eval()
+            restored = BGCDetector(**detector_settings(metadata, 8)).eval()
             restored.load_state_dict(state, strict=True)
             x = torch.randn(2, 8, 8)
             with torch.no_grad():

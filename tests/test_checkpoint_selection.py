@@ -6,7 +6,7 @@ import torch
 
 from bgc_gnn.checkpoint import load_checkpoint, save_checkpoint
 from bgc_gnn.eval import window_aggregation_weight
-from bgc_gnn.model import BGCProphetDetector
+from bgc_gnn.model import BGCDetector
 
 
 class CheckpointRoundTripTest(unittest.TestCase):
@@ -24,12 +24,12 @@ class CheckpointRoundTripTest(unittest.TestCase):
             window_aggregation_weight(128, 128, "mean")
 
     def test_checkpoint_round_trip_keeps_weights_and_metadata(self) -> None:
-        model = BGCProphetDetector(input_dim=16, d_model=16, nhead=2, num_layers=1)
+        model = BGCDetector(input_dim=16, d_model=16, nhead=2, num_layers=1)
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "detector_16d_best.pt"
             save_checkpoint(path, model, {"epoch": 7, "validation_threshold": 0.42})
             state, metadata = load_checkpoint(path, "cpu")
-            restored = BGCProphetDetector(input_dim=16, d_model=16, nhead=2, num_layers=1)
+            restored = BGCDetector(input_dim=16, d_model=16, nhead=2, num_layers=1)
             restored.load_state_dict(state, strict=True)
             self.assertEqual(metadata["epoch"], 7)
             for name, tensor in model.state_dict().items():

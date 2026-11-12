@@ -29,7 +29,7 @@ from torch.nn import functional as F
 from torch.utils.data import Dataset, DataLoader
 
 from bgc_gnn.checkpoint import file_fingerprint, runtime_metadata, save_checkpoint
-from bgc_gnn.model import WINDOW_SIZE, BGCProphetDetector
+from bgc_gnn.model import WINDOW_SIZE, BGCDetector
 
 EMBEDDING_DIM = 960
 COLUMNS = ("sequence_ids", "valid_mask", "detect_mask", "loss_mask")
@@ -164,7 +164,7 @@ def main():
         if not split.positive or not split.negative:
             p.error("weak training requires positive and background supervision in both splits")
 
-    detector = BGCProphetDetector(
+    detector = BGCDetector(
         d_model=EMBEDDING_DIM, num_layers=2, nhead=15, input_dim=EMBEDDING_DIM,
         # No semantic skip: the transferred checkpoint carries encoder + head only,
         # and the zero-initialized skip is added by the downstream detector.
@@ -182,7 +182,7 @@ def main():
         "inputs": inputs,
         "cache": cache,
         "architecture": {
-            "model": "bgcp", "arch": "channel_gated_conv_gru",
+            "model": "convgru", "arch": "channel_gated_conv_gru",
             "input_dim": EMBEDDING_DIM, "d_model": EMBEDDING_DIM,
             "num_layers": 2, "nhead": 15, "input_norm": True,
             "kernel_size": 5, "semantic_skip": False, "context_readout": False,

@@ -300,7 +300,7 @@ class PretrainingTest(unittest.TestCase):
     def test_weak_pretraining_cli_completes_and_transfers(self):
         from bgc_gnn import pretrain
         from bgc_gnn.checkpoint import initialize_from_pretraining
-        from bgc_gnn.model import BGCProphetDetector
+        from bgc_gnn.model import BGCDetector
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); cache = root/'cache'; cache.mkdir()
             ids = [sequence_id('M'+'A'*i) for i in range(1, 9)]
@@ -341,7 +341,7 @@ class PretrainingTest(unittest.TestCase):
             _, saved = load_checkpoint(dest/'pretrained_best.pt')
             self.assertEqual(saved['pretraining_method'], 'weak')
             self.assertEqual(saved['selection_metric'], 'pretraining_val_loss')
-            target = BGCProphetDetector(input_dim=960, d_model=960, num_layers=2, nhead=15,
+            target = BGCDetector(input_dim=960, d_model=960, num_layers=2, nhead=15,
                                         context_readout=True)
             provenance = initialize_from_pretraining(target, dest/'pretrained_best.pt')
             self.assertEqual(provenance['method'], 'weak')

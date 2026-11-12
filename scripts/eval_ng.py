@@ -42,7 +42,7 @@ from tqdm import tqdm
 from bgc_gnn.checkpoint import detector_settings, load_checkpoint, validation_threshold
 from bgc_gnn.dataset import normalize_strand, normalize_translation
 from bgc_gnn.eval import bgc_prophet_postprocess, window_aggregation_weight
-from bgc_gnn.model import BGCProphetDetector, WINDOW_SIZE
+from bgc_gnn.model import BGCDetector, WINDOW_SIZE
 
 # ── paths ───────────────────────────────────────────────────────────────────
 GBK_PATH = Path("data/raw/ng/ClusterFinder_Annotated_Contigs.full.gbk")
@@ -117,7 +117,7 @@ def load_labels(csv_path: Path, genes: list[dict]) -> dict[str, bool]:
 def load_detector(checkpoint: str, device: torch.device):
     state, metadata = load_checkpoint(checkpoint, device)
     settings = detector_settings(metadata, EMBEDDING_DIM)
-    model = BGCProphetDetector(**settings).to(device)
+    model = BGCDetector(**settings).to(device)
     model.load_state_dict(state, strict=True)
     model.eval()
     return model, metadata, settings
