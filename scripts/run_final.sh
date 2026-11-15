@@ -6,24 +6,41 @@ cd "$(dirname "$0")/.."
 
 SEEDS=(${SEEDS:-1301 1302 1303 1304 1305})
 GPUS=(${GPUS:-0})
-TRAIN_DIR=${TRAIN_DIR:-runs/final_seed}
-PRETRAIN_DIR=${PRETRAIN_DIR:-pretrain/seed}
-PRETRAIN_REUSE=${PRETRAIN_REUSE:-}  # completed checkpoint directory template with {seed}
-TRAIN_DS=${TRAIN_DS:-data/derived/train_test/dataset_train.parquet}
-VAL_DS=${VAL_DS:-data/derived/train_test/dataset_val.parquet}
-EMB_PATH=${EMB_PATH:-data/derived/catalog/gene_embeddings_960d.parquet}
-NG_EMB=data/derived/ng_embeddings/ng_gene_embeddings_960d.parquet
-PT_DATA=${PT_DATA:-data/derived/pretraining/antismash_v2_v1}
-PT_CACHE=${PT_CACHE:-data/derived/pretraining/antismash_v2_v1_restart_v2_cache}
+DATA_ROOT=${DATA_ROOT:-data}
+OUTPUT_ROOT=${OUTPUT_ROOT:-.}
+TRAIN_DIR=${TRAIN_DIR:-${OUTPUT_ROOT}/runs/final_seed}
+PRETRAIN_DIR=${PRETRAIN_DIR:-${OUTPUT_ROOT}/pretrain/seed}
+PRETRAIN_REUSE=${PRETRAIN_REUSE:-}  # empty means new pretraining for every seed
+TRAIN_DS=${TRAIN_DS:-${DATA_ROOT}/derived/train_test/dataset_train.parquet}
+VAL_DS=${VAL_DS:-${DATA_ROOT}/derived/train_test/dataset_val.parquet}
+EMB_PATH=${EMB_PATH:-${DATA_ROOT}/derived/catalog/gene_embeddings_960d.parquet}
+NG_EMB=${NG_EMB:-${DATA_ROOT}/derived/ng_embeddings/ng_gene_embeddings_960d.parquet}
+NG_GBK=${NG_GBK:-${DATA_ROOT}/raw/ng/ClusterFinder_Annotated_Contigs.full.gbk}
+NG_LABELS=${NG_LABELS:-${DATA_ROOT}/raw/ng/291BGC.csv}
+PT_DATA=${PT_DATA:-${DATA_ROOT}/derived/pretraining/antismash_v2_v1}
+PT_CACHE=${PT_CACHE:-${DATA_ROOT}/derived/pretraining/antismash_v2_v1_restart_v2_cache}
 
-for f in "$TRAIN_DS" "$VAL_DS" "$EMB_PATH" "$NG_EMB"; do
+# Historical inputs keep their original names and contents; never rename shared data.
+if [ ! -f "$TRAIN_DS" ] && [ "$TRAIN_DS" = "${DATA_ROOT}/derived/train_test/dataset_train.parquet" ]; then
+    TRAIN_DS=${DATA_ROOT}/derived/train_test/dataset_legacy_train.parquet
+fi
+if [ ! -f "$VAL_DS" ] && [ "$VAL_DS" = "${DATA_ROOT}/derived/train_test/dataset_val.parquet" ]; then
+    VAL_DS=${DATA_ROOT}/derived/train_test/dataset_legacy_val.parquet
+fi
+
+for f in "$TRAIN_DS" "$VAL_DS" "$EMB_PATH" "$NG_EMB" "$NG_GBK" "$NG_LABELS"; do
     [ -f "$f" ] || { echo "missing: $f"; exit 1; }
 done
 if [ -z "$PRETRAIN_REUSE" ]; then
-    for f in "$PT_DATA/audit.json" "$PT_CACHE/metadata.json"; do
+    for f in "$PT_DATA/audit.json" "$PT_DATA/windows_train.parquet" "$PT_DATA/windows_val.parquet" \
+             "$PT_DATA/proteins.parquet" "$PT_CACHE/metadata.json" \
+             "$PT_CACHE/embeddings.npy" "$PT_CACHE/sequence_ids.json"; do
         [ -f "$f" ] || { echo "missing: $f"; exit 1; }
     done
 fi
+
+printf 'Input data root: %s\nOutput root: %s\nTrain: %s\nValidation: %s\n' \
+    "$DATA_ROOT" "$OUTPUT_ROOT" "$TRAIN_DS" "$VAL_DS"
 
 run_one() {
     local seed=$1 gpu=$2
@@ -63,6 +80,7 @@ run_one() {
 
     uv run python -u scripts/eval_ng.py \
         --checkpoint "$run_dir/detector_960d_best.pt" --device "cuda:${gpu}" \
+        --ng-gbk "$NG_GBK" --labels "$NG_LABELS" --emb-path "$NG_EMB" \
         --metrics-path "$run_dir/ng_metrics.json" \
         > "$log_dir/eval_overlap.log" 2>&1 \
         || { echo "PRIMARY EVAL FAILED: $log_dir/eval_overlap.log"; return 1; }

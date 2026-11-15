@@ -21,6 +21,79 @@ class ScoreDetector(torch.nn.Module):
 
 
 class NGEvaluationTest(unittest.TestCase):
+    def test_cli_reads_external_data_root_and_defaults_output_to_checkpoint_directory(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data = root / "read only data"
+            raw = data / "raw/ng"
+            raw.mkdir(parents=True)
+            gbk = raw / "ClusterFinder_Annotated_Contigs.full.gbk"
+            csv = raw / "291BGC.csv"
+            gbk.touch()
+            csv.touch()
+            emb = data / "derived/ng_embeddings/ng_gene_embeddings_960d.parquet"
+            emb.parent.mkdir(parents=True)
+            emb.touch()
+            checkpoint = root / "outputs/selected.pt"
+            checkpoint.parent.mkdir()
+            genes = [
+                {"gene_id": "g0", "accession": "c", "start": 0},
+                {"gene_id": "g1", "accession": "c", "start": 1},
+            ]
+            metadata = {
+                "validation_threshold": 0.5,
+                "validation_threshold_source": "validation",
+                "validation_threshold_metric": "mcc",
+                "epoch": 1,
+            }
+            pq.write_table(
+                pa.table(
+                    {"gene_id": ["g0", "g1"], "embedding": [[0.9] * 960, [0.1] * 960]}
+                ),
+                emb,
+            )
+            before = {
+                p.relative_to(data): p.read_bytes()
+                for p in data.rglob("*")
+                if p.is_file()
+            }
+            with (
+                patch(
+                    "sys.argv",
+                    [
+                        "eval",
+                        "--data-root",
+                        str(data),
+                        "--checkpoint",
+                        str(checkpoint),
+                        "--device",
+                        "cpu",
+                    ],
+                ),
+                patch.object(eval_ng, "parse_ng_gbk", return_value=genes) as parse,
+                patch.object(
+                    eval_ng, "load_labels", return_value={"g0": True, "g1": False}
+                ) as labels,
+                patch.object(
+                    eval_ng, "load_detector", return_value=(ScoreDetector(), metadata)
+                ),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                eval_ng.main()
+            labels.assert_called_once_with(csv, genes)
+            self.assertTrue(all(call.args[0] == gbk for call in parse.call_args_list))
+            self.assertTrue((checkpoint.parent / "ng_metrics.json").is_file())
+            self.assertEqual(
+                before,
+                {
+                    p.relative_to(data): p.read_bytes()
+                    for p in data.rglob("*")
+                    if p.is_file()
+                },
+            )
+
     def test_repeated_tail_occurrences_use_arithmetic_mean(self):
         class PositionDetector(torch.nn.Module):
             def forward(self, x):

@@ -52,18 +52,55 @@ class EntrypointTest(unittest.TestCase):
     def test_runner_stops_if_pretraining_fails(self):
         self._runner(fail=True)
 
-    def _runner(self, fail):
+    @unittest.skipUnless(shutil.which("bash"), "runner requires bash")
+    def test_runner_reads_external_historical_data_and_writes_separate_outputs(self):
+        self._runner(fail=False, historical=True)
+
+    @unittest.skipUnless(shutil.which("bash"), "runner requires bash")
+    def test_runner_checks_ng_labels_before_launching_pretraining(self):
+        self._runner(fail=False, missing_labels=True)
+
+    def _runner(self, fail, historical=False, missing_labels=False):
         with tempfile.TemporaryDirectory() as tmp:
             t = Path(tmp)
             (t / "scripts").mkdir()
             shutil.copyfile(ROOT / "scripts/run_final.sh", t / "scripts/run_final.sh")
-            ng = t / "data/derived/ng_embeddings"
+            data_root = t / "external data"
+            ng = data_root / "derived/ng_embeddings"
             ng.mkdir(parents=True)
             (ng / "ng_gene_embeddings_960d.parquet").touch()
-            (t / "placeholder").touch()
-            for name, fn in [("data", "audit.json"), ("cache", "metadata.json")]:
-                (t / name).mkdir(exist_ok=True)
-                (t / name / fn).write_text("{}")
+            raw = data_root / "raw/ng"
+            raw.mkdir(parents=True)
+            (raw / "ClusterFinder_Annotated_Contigs.full.gbk").touch()
+            if not missing_labels:
+                (raw / "291BGC.csv").touch()
+            windows = data_root / "derived/train_test"
+            windows.mkdir(parents=True)
+            prefix = "dataset_legacy" if historical else "dataset"
+            for split in ["train", "val"]:
+                (windows / f"{prefix}_{split}.parquet").touch()
+            catalog = data_root / "derived/catalog"
+            catalog.mkdir(parents=True)
+            (catalog / "gene_embeddings_960d.parquet").touch()
+            pt = data_root / "derived/pretraining/antismash_v2_v1"
+            cache = data_root / "derived/pretraining/antismash_v2_v1_restart_v2_cache"
+            pt.mkdir(parents=True)
+            cache.mkdir()
+            for fn in [
+                "audit.json",
+                "windows_train.parquet",
+                "windows_val.parquet",
+                "proteins.parquet",
+            ]:
+                (pt / fn).write_text("{}")
+            for fn in ["metadata.json", "embeddings.npy", "sequence_ids.json"]:
+                (cache / fn).write_text("{}")
+            before = {
+                p.relative_to(data_root): p.read_bytes()
+                for p in data_root.rglob("*")
+                if p.is_file()
+            }
+            output_root = t / "separate outputs"
             worker = t / "worker.py"
             worker.write_text(
                 """from pathlib import Path
@@ -72,6 +109,7 @@ args=sys.argv[1:]
 def arg(name):return args[args.index(name)+1]
 if 'bgc_gnn.pretrain' in args:
     stage='pretrain'; output=Path(arg('--output-dir'))
+    assert Path(arg('--data-dir')).parent.parent.parent == Path(os.environ['DATA_ROOT'])
     assert not output.exists(), 'runner created output before pretraining'
     if os.environ.get('FAIL_PRETRAIN')=='1':sys.exit(1)
     output.mkdir(parents=True)
@@ -79,6 +117,8 @@ if 'bgc_gnn.pretrain' in args:
     (output/'status.json').write_text(json.dumps({'status':'completed'}))
 elif 'bgc_gnn.train' in args:
     stage='train'; output=Path(arg('--checkpoint-dir'))
+    assert Path(arg('--fixed-dataset')).name == os.environ['EXPECTED_TRAIN']
+    assert Path(arg('--fixed-val-dataset')).is_file()
     assert not output.exists(), 'runner created output before training'
     assert Path(arg('--pretrained-checkpoint')).is_file()
     assert not any(s in args for s in ['--epochs','--context-readout','--batch-size'])
@@ -87,6 +127,7 @@ elif 'bgc_gnn.train' in args:
 else:
     stage='overlap'
     assert '--protocol' not in args
+    assert all(Path(arg(k)).is_file() for k in ['--ng-gbk','--labels','--emb-path'])
     Path(arg('--metrics-path')).write_text('{}')
 with open(os.environ['STAGE_LOG'],'a') as f:f.write(stage+'\\n')
 """,
@@ -102,7 +143,19 @@ with open(os.environ['STAGE_LOG'],'a') as f:f.write(stage+'\\n')
             )
             fake_uv.chmod(0o755)
             env = os.environ.copy()
-            for name in ["PRETRAIN_REUSE", "TRAIN_DIR", "PRETRAIN_DIR"]:
+            for name in [
+                "PRETRAIN_REUSE",
+                "TRAIN_DIR",
+                "PRETRAIN_DIR",
+                "TRAIN_DS",
+                "VAL_DS",
+                "EMB_PATH",
+                "NG_EMB",
+                "NG_GBK",
+                "NG_LABELS",
+                "PT_DATA",
+                "PT_CACHE",
+            ]:
                 env.pop(name, None)
             env.update(
                 PATH=str(bindir) + os.pathsep + env["PATH"],
@@ -111,11 +164,9 @@ with open(os.environ['STAGE_LOG'],'a') as f:f.write(stage+'\\n')
                 STAGE_LOG=(t / "stages").as_posix(),
                 SEEDS="1506",
                 GPUS="0",
-                TRAIN_DS=(t / "placeholder").as_posix(),
-                VAL_DS=(t / "placeholder").as_posix(),
-                EMB_PATH=(t / "placeholder").as_posix(),
-                PT_DATA=(t / "data").as_posix(),
-                PT_CACHE=(t / "cache").as_posix(),
+                DATA_ROOT=data_root.as_posix(),
+                OUTPUT_ROOT=output_root.as_posix(),
+                EXPECTED_TRAIN=f"{prefix}_train.parquet",
                 FAIL_PRETRAIN="1" if fail else "0",
             )
             p = subprocess.run(
@@ -126,9 +177,22 @@ with open(os.environ['STAGE_LOG'],'a') as f:f.write(stage+'\\n')
                 text=True,
                 timeout=30,
             )
-            if fail:
+            self.assertEqual(
+                before,
+                {
+                    p.relative_to(data_root): p.read_bytes()
+                    for p in data_root.rglob("*")
+                    if p.is_file()
+                },
+            )
+            if missing_labels:
                 self.assertNotEqual(p.returncode, 0)
-                self.assertFalse((t / "runs/final_seed1506").exists())
+                self.assertIn("291BGC.csv", p.stdout)
+                self.assertFalse((t / "stages").exists())
+                self.assertFalse(output_root.exists())
+            elif fail:
+                self.assertNotEqual(p.returncode, 0)
+                self.assertFalse((output_root / "runs/final_seed1506").exists())
                 self.assertNotIn("All seeds completed", p.stdout)
             else:
                 self.assertEqual(p.returncode, 0, p.stdout + p.stderr)

@@ -59,10 +59,6 @@ def _embedding_path() -> Path:
     return OUT_DIR / f"ng_gene_embeddings_{EMBEDDING_DIM}d.parquet"
 
 
-def _metrics_path() -> Path:
-    return OUT_DIR / f"ng_metrics_{EMBEDDING_DIM}d.json"
-
-
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
@@ -149,11 +145,17 @@ def evaluate_model(
     metrics_path: str = "",
     fixed_threshold_metrics_path: str = "",
     dump_gene_scores: str = "",
+    ng_gbk: Path = GBK_PATH,
+    emb_path: Path | None = None,
 ) -> None:
     """Evaluate using fixed 128-gene windows (same as training)."""
     print("[5] Evaluating model (fixed-window) ...", flush=True)
     stride, aggregate = 64, "mean"
-    selected_output = Path(metrics_path) if metrics_path else _metrics_path()
+    selected_output = (
+        Path(metrics_path)
+        if metrics_path
+        else Path(checkpoint).parent / "ng_metrics.json"
+    )
     if (
         fixed_threshold_metrics_path
         and Path(fixed_threshold_metrics_path).resolve() == selected_output.resolve()
@@ -164,7 +166,7 @@ def evaluate_model(
 
     print("  Loading embeddings ...", flush=True)
     emb_map: dict[str, np.ndarray] = {}
-    table = pq.read_table(_embedding_path())
+    table = pq.read_table(emb_path if emb_path is not None else _embedding_path())
     for gid, emb in zip(
         table.column("gene_id").to_pylist(), table.column("embedding").to_pylist()
     ):
@@ -187,7 +189,7 @@ def evaluate_model(
     model, metadata = load_detector(checkpoint, torch_device)
     calibrated_threshold, threshold_source = validation_threshold(metadata)
 
-    genes = parse_ng_gbk(GBK_PATH)
+    genes = parse_ng_gbk(ng_gbk)
     full_gene_order: dict[str, list[str]] = defaultdict(list)
     for g in genes:
         full_gene_order[g["accession"]].append(g["gene_id"])
@@ -383,6 +385,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Evaluate a BGC detector on the NG set"
     )
+    parser.add_argument(
+        "--data-root",
+        type=Path,
+        default=Path("data"),
+        help="Read-only data directory containing raw/ and derived/",
+    )
+    parser.add_argument("--ng-gbk", type=Path)
+    parser.add_argument("--labels", type=Path)
+    parser.add_argument("--emb-path", type=Path)
     parser.add_argument("--checkpoint", type=str, required=True)
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument(
@@ -405,8 +416,19 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    labels = load_labels(CSV_PATH, parse_ng_gbk(GBK_PATH))
+    ng_gbk = (
+        args.ng_gbk
+        or args.data_root / "raw/ng/ClusterFinder_Annotated_Contigs.full.gbk"
+    )
+    labels_path = args.labels or args.data_root / "raw/ng/291BGC.csv"
+    emb_path = (
+        args.emb_path
+        or args.data_root / "derived/ng_embeddings/ng_gene_embeddings_960d.parquet"
+    )
+    for path in [ng_gbk, labels_path, emb_path]:
+        if not path.is_file():
+            parser.error(f"missing input: {path}")
+    labels = load_labels(labels_path, parse_ng_gbk(ng_gbk))
     evaluate_model(
         args.checkpoint,
         labels,
@@ -414,6 +436,8 @@ def main() -> None:
         metrics_path=args.metrics_path,
         fixed_threshold_metrics_path=args.fixed_threshold_metrics_path,
         dump_gene_scores=args.dump_gene_scores,
+        ng_gbk=ng_gbk,
+        emb_path=emb_path,
     )
     print("Done.", flush=True)
 
