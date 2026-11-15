@@ -15,7 +15,7 @@ Usage
 from __future__ import annotations
 
 import argparse
-import os
+import sys
 import time
 from datetime import timedelta
 from pathlib import Path
@@ -25,23 +25,24 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 from torch.nn.attention import SDPBackend, sdpa_kernel
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from bgc_gnn.dataset import normalize_strand, normalize_translation
 
-# HF-native weights, rotary (no length cap). Override for ESMC-600M:
-#   ESMC_MODEL_NAME=biohub/ESMC-600M ESMC_DIM=1152
-ESMC_MODEL = (os.environ.get("ESMC_MODEL_NAME", "biohub/ESMC-300M"),
-              int(os.environ.get("ESMC_DIM", "960")))
+ESMC_MODEL = "biohub/ESMC-300M"
+EMBEDDING_DIM = 960
 
 NG_GBK = Path("data/raw/ng/ClusterFinder_Annotated_Contigs.full.gbk")
 NG_OUT_DIR = Path("data/derived/ng_embeddings")
 SOURCES = ("catalog", "ng")
 
 
-def load_model(model_name: str, device):
+def load_model(device):
     """Load ESMC via biohub's esm package (architecture is not in transformers)."""
     from esm.models.esmc import EsmcModel, EsmcTokenizer
-    m = EsmcModel.from_pretrained(model_name, dtype=torch.bfloat16).to(device)
-    tok = EsmcTokenizer.from_pretrained(model_name)
+
+    m = EsmcModel.from_pretrained(ESMC_MODEL, dtype=torch.bfloat16).to(device)
+    tok = EsmcTokenizer.from_pretrained(ESMC_MODEL)
     m.eval()
     return m, tok
 
@@ -49,8 +50,11 @@ def load_model(model_name: str, device):
 def load_catalog_rows(catalog_dir: Path) -> list[dict]:
     table = pq.read_table(catalog_dir / "gene_catalog.parquet")
     return [
-        {"gene_id": r["gene_id"], "strand": r["strand"],
-         "target_aa": normalize_translation(r["target_aa"])}
+        {
+            "gene_id": r["gene_id"],
+            "strand": r["strand"],
+            "target_aa": normalize_translation(r["target_aa"]),
+        }
         for r in table.to_pylist()
     ]
 
@@ -58,6 +62,7 @@ def load_catalog_rows(catalog_dir: Path) -> list[dict]:
 def load_ng_rows(ng_gbk: Path) -> list[dict]:
     """Parse 9-genome GBK → one row per CDS (locus_tag-based dedup)."""
     from Bio import SeqIO
+
     rows: list[dict] = []
     seen: set[str] = set()
     for record in SeqIO.parse(str(ng_gbk), "genbank"):
@@ -73,8 +78,13 @@ def load_ng_rows(ng_gbk: Path) -> list[dict]:
             if gid in seen:
                 continue
             seen.add(gid)
-            rows.append({"gene_id": gid, "target_aa": aa,
-                         "strand": normalize_strand(feat.location.strand)})
+            rows.append(
+                {
+                    "gene_id": gid,
+                    "target_aa": aa,
+                    "strand": normalize_strand(feat.location.strand),
+                }
+            )
     return rows
 
 
@@ -98,8 +108,13 @@ def output_path(source: str, emb_dim: int, catalog_dir: Path, ng_out_dir: Path) 
 
 
 def run(
-    source: str, catalog_dir: Path, ng_gbk: Path, ng_out_dir: Path,
-    max_toks: int, max_genes: int | None, device_str: str,
+    source: str,
+    catalog_dir: Path,
+    ng_gbk: Path,
+    ng_out_dir: Path,
+    max_toks: int,
+    max_genes: int | None,
+    device_str: str,
 ):
     device = torch.device(device_str if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
@@ -108,11 +123,13 @@ def run(
         torch.cuda.set_device(device)
     print(f"Device: {device}", flush=True)
 
-    model_name, emb_dim = ESMC_MODEL
+    model_name, emb_dim = ESMC_MODEL, EMBEDDING_DIM
     print(f"Model: {model_name} (esmc, {emb_dim}d)", flush=True)
-    model_obj, tokenizer = load_model(model_name, device)
+    model_obj, tokenizer = load_model(device)
 
-    rows = load_catalog_rows(catalog_dir) if source == "catalog" else load_ng_rows(ng_gbk)
+    rows = (
+        load_catalog_rows(catalog_dir) if source == "catalog" else load_ng_rows(ng_gbk)
+    )
     if max_genes:
         rows = rows[:max_genes]
     n_genes = len(rows)
@@ -129,10 +146,15 @@ def run(
 
     out_path = output_path(source, emb_dim, catalog_dir, ng_out_dir)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    writer = pq.ParquetWriter(out_path, pa.schema([
-        ("gene_id", pa.string()),
-        ("embedding", pa.list_(pa.float32(), emb_dim)),
-    ]))
+    writer = pq.ParquetWriter(
+        out_path,
+        pa.schema(
+            [
+                ("gene_id", pa.string()),
+                ("embedding", pa.list_(pa.float32(), emb_dim)),
+            ]
+        ),
+    )
 
     flush_every = 5000
     log_secs = 30  # time-based: batch sizes vary, gene-count gates print irregularly
@@ -165,9 +187,16 @@ def run(
         enc = tokenizer(batch_inputs, return_tensors="pt", padding=True)
         input_ids = enc["input_ids"].to(device)
         attn = enc["attention_mask"].to(device)
-        with torch.inference_mode(), sdpa_kernel([
-            SDPBackend.EFFICIENT_ATTENTION, SDPBackend.FLASH_ATTENTION, SDPBackend.MATH,
-        ]):
+        with (
+            torch.inference_mode(),
+            sdpa_kernel(
+                [
+                    SDPBackend.EFFICIENT_ATTENTION,
+                    SDPBackend.FLASH_ATTENTION,
+                    SDPBackend.MATH,
+                ]
+            ),
+        ):
             out = model_obj(input_ids=input_ids, attention_mask=attn)
         hidden = out.last_hidden_state  # [B, T, D]
 
@@ -182,10 +211,16 @@ def run(
         total += len(batch_rows)
 
         if len(buffer_gids) >= flush_every:
-            writer.write_table(pa.table({
-                "gene_id": pa.array(buffer_gids, pa.string()),
-                "embedding": pa.array(buffer_embs, pa.list_(pa.float32(), emb_dim)),
-            }))
+            writer.write_table(
+                pa.table(
+                    {
+                        "gene_id": pa.array(buffer_gids, pa.string()),
+                        "embedding": pa.array(
+                            buffer_embs, pa.list_(pa.float32(), emb_dim)
+                        ),
+                    }
+                )
+            )
             buffer_gids.clear()
             buffer_embs.clear()
 
@@ -199,43 +234,70 @@ def run(
             avg = total / elapsed if elapsed > 0 else 0
             # eta from the instantaneous rate: the length-sorted ramp makes the
             # cumulative average unrepresentative early on
-            eta = (str(timedelta(seconds=int((n_genes - total) / inst)))
-                   if inst > 0 else "?")
-            mem = (f"  gpu={torch.cuda.memory_allocated(device)/2**30:.1f}/"
-                   f"{torch.cuda.memory_reserved(device)/2**30:.1f}G"
-                   if device.type == "cuda" else "")
-            print(f"  [{total}/{n_genes} {100*total/n_genes:.1f}%]"
-                  f"  {inst:.1f} genes/s (avg {avg:.1f})"
-                  f"  elapsed={timedelta(seconds=int(elapsed))}"
-                  f"  eta={eta}{mem}", flush=True)
+            eta = (
+                str(timedelta(seconds=int((n_genes - total) / inst)))
+                if inst > 0
+                else "?"
+            )
+            mem = (
+                f"  gpu={torch.cuda.memory_allocated(device) / 2**30:.1f}/"
+                f"{torch.cuda.memory_reserved(device) / 2**30:.1f}G"
+                if device.type == "cuda"
+                else ""
+            )
+            print(
+                f"  [{total}/{n_genes} {100 * total / n_genes:.1f}%]"
+                f"  {inst:.1f} genes/s (avg {avg:.1f})"
+                f"  elapsed={timedelta(seconds=int(elapsed))}"
+                f"  eta={eta}{mem}",
+                flush=True,
+            )
 
     if buffer_gids:
-        writer.write_table(pa.table({
-            "gene_id": pa.array(buffer_gids, pa.string()),
-            "embedding": pa.array(buffer_embs, pa.list_(pa.float32(), emb_dim)),
-        }))
+        writer.write_table(
+            pa.table(
+                {
+                    "gene_id": pa.array(buffer_gids, pa.string()),
+                    "embedding": pa.array(buffer_embs, pa.list_(pa.float32(), emb_dim)),
+                }
+            )
+        )
     writer.close()
-    print(f"\nDone - {total:,} embeddings in {(time.time()-t0)/60:.1f} min", flush=True)
+    print(
+        f"\nDone - {total:,} embeddings in {(time.time() - t0) / 60:.1f} min",
+        flush=True,
+    )
     print(f"  Output: {out_path}", flush=True)
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Encode genes through frozen ESMC-300M.")
-    p.add_argument("--source", required=True, choices=list(SOURCES),
-                   help="catalog = read gene_catalog.parquet; "
-                        "ng = parse 9-genome GBK (NG test set)")
+    p.add_argument(
+        "--source",
+        required=True,
+        choices=list(SOURCES),
+        help="catalog = read gene_catalog.parquet; "
+        "ng = parse 9-genome GBK (NG test set)",
+    )
     p.add_argument("--catalog-dir", default="data/derived/catalog")
     p.add_argument("--ng-gbk", default=str(NG_GBK))
     p.add_argument("--ng-out-dir", default=str(NG_OUT_DIR))
-    p.add_argument("--max-toks", type=int, default=40960,
-                   help="Max tokens per dynamic batch")
-    p.add_argument("--max-genes", type=int, default=None,
-                   help="Cap number of genes (debug)")
+    p.add_argument(
+        "--max-toks", type=int, default=40960, help="Max tokens per dynamic batch"
+    )
+    p.add_argument(
+        "--max-genes", type=int, default=None, help="Cap number of genes (debug)"
+    )
     p.add_argument("--device", default="cuda", help="cuda / cuda:0 / cpu")
     args = p.parse_args()
     run(
-        args.source, Path(args.catalog_dir), Path(args.ng_gbk), Path(args.ng_out_dir),
-        args.max_toks, args.max_genes, args.device,
+        args.source,
+        Path(args.catalog_dir),
+        Path(args.ng_gbk),
+        Path(args.ng_out_dir),
+        args.max_toks,
+        args.max_genes,
+        args.device,
     )
 
 

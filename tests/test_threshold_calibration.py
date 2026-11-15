@@ -20,12 +20,29 @@ class ThresholdCalibrationTest(unittest.TestCase):
         self.assertEqual(f1_threshold, 0.3)
         self.assertAlmostEqual(f1, 6 / 7)
 
-    def test_old_checkpoint_uses_half_threshold(self) -> None:
+    def test_rejects_unannotated_weights_and_missing_validation_threshold(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            path = Path(temp_dir) / "legacy.pt"
+            path = Path(temp_dir) / "unannotated.pt"
             torch.save({"weight": torch.ones(1)}, path)
-            _, metadata = load_checkpoint(path)
-            self.assertEqual(validation_threshold(metadata), (0.5, "legacy-default"))
+            with self.assertRaisesRegex(ValueError, "model_state and metadata"):
+                load_checkpoint(path)
+            for metadata in [
+                {},
+                {"validation_threshold": float("nan")},
+                {"validation_threshold": 0.5, "validation_threshold_source": "test"},
+            ]:
+                with self.assertRaisesRegex(ValueError, "validation-MCC"):
+                    validation_threshold(metadata)
+            self.assertEqual(
+                validation_threshold(
+                    {
+                        "validation_threshold": 0.42,
+                        "validation_threshold_source": "validation",
+                        "validation_threshold_metric": "mcc",
+                    }
+                ),
+                (0.42, "validation"),
+            )
 
 
 if __name__ == "__main__":

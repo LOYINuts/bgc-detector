@@ -4,11 +4,10 @@ DeepBGC scores each protein once (mean of its Pfam-domain scores), so it has no
 window/stride protocol. To stay comparable with the project ledger we report:
 
   unique_genes        per-gene scores; unit of the overlap (stride64/mean) entry
-  stride128_positions the exact gene-position multiset of the stride128/none entry
   pfam_subset         only genes DeepBGC scored; it skips proteins without Pfam
                       domains, so unscored genes cannot enter this block
 
-In the first two blocks an unscored gene is imputed 0.0, which is what DeepBGC
+In the full unique-gene block an unscored gene is imputed 0.0, which is what DeepBGC
 effectively does when it decodes regions from scores.
 
 Usage (on the server, project venv):
@@ -23,7 +22,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import argparse
 import csv
@@ -43,7 +41,7 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
-from eval_ng import CSV_PATH, GBK_PATH, WINDOW_SIZE, load_labels, parse_ng_gbk
+from scripts.eval_ng import CSV_PATH, GBK_PATH, load_labels, parse_ng_gbk
 
 SCORE_QUALIFIER = "deepbgc_score"
 FIXED_THRESHOLD = 0.5
@@ -65,24 +63,20 @@ def load_deepbgc_scores(paths: list[str]) -> dict[str, float]:
     return scores
 
 
-def remap_locus_tags(raw_scores: dict[str, float], locus_tag_to_gene_id: dict[str, str]) -> dict[str, float]:
+def remap_locus_tags(
+    raw_scores: dict[str, float], locus_tag_to_gene_id: dict[str, str]
+) -> dict[str, float]:
     """DeepBGC keys scores by locus_tag; NG gene IDs are "<accession>:<locus_tag>"."""
-    return {locus_tag_to_gene_id[lt]: score for lt, score in raw_scores.items()
-            if lt in locus_tag_to_gene_id}
+    return {
+        locus_tag_to_gene_id[lt]: score
+        for lt, score in raw_scores.items()
+        if lt in locus_tag_to_gene_id
+    }
 
 
-def window_positions(n: int, stride: int = WINDOW_SIZE, window: int = WINDOW_SIZE) -> list[list[int]]:
-    """Gene positions of every inference window, tail wrapped like eval_ng.py."""
-    windows = []
-    for start in range(0, n, stride):
-        positions = list(range(start, min(start + window, n)))
-        if len(positions) < window:
-            positions.extend(i % n for i in range(window - len(positions)))
-        windows.append(positions)
-    return windows
-
-
-def threshold_metrics(y_true: np.ndarray, y_score: np.ndarray, threshold: float) -> dict:
+def threshold_metrics(
+    y_true: np.ndarray, y_score: np.ndarray, threshold: float
+) -> dict:
     y_pred = (y_score >= threshold).astype(np.int32)
     return {
         "threshold": float(threshold),
@@ -102,8 +96,12 @@ def evaluate_block(y_true: np.ndarray, y_score: np.ndarray) -> dict:
         "n_genes": int(len(y_true)),
         "n_pos": n_pos,
         "n_neg": int(len(y_true) - n_pos),
-        "auroc": float(roc_auc_score(y_true, y_score)) if 0 < n_pos < len(y_true) else 0.5,
-        "auprc": float(average_precision_score(y_true, y_score)) if 0 < n_pos < len(y_true) else 0.0,
+        "auroc": float(roc_auc_score(y_true, y_score))
+        if 0 < n_pos < len(y_true)
+        else 0.5,
+        "auprc": float(average_precision_score(y_true, y_score))
+        if 0 < n_pos < len(y_true)
+        else 0.0,
         "prevalence": prevalence,
     }
     block["auprc_lift"] = block["auprc"] / prevalence if prevalence else 0.0
@@ -156,18 +154,9 @@ def score_vectors(
     order: dict[str, list[str]],
     labels: dict[str, bool],
     scores: dict[str, float],
-    mode: str,
 ) -> tuple[np.ndarray, np.ndarray, int]:
-    """Return (y_true, y_score, n_scored) for mode unique_genes|stride128_positions."""
-    gene_ids: list[str] = []
-    if mode == "unique_genes":
-        gene_ids = [gene_id for ordered in order.values() for gene_id in ordered]
-    elif mode == "stride128_positions":
-        for ordered in order.values():
-            for positions in window_positions(len(ordered)):
-                gene_ids.extend(ordered[position] for position in positions)
-    else:
-        raise ValueError(f"unknown mode: {mode}")
+    """Return one label/score per gene, matching overlap mean evaluation units."""
+    gene_ids = [gene_id for ordered in order.values() for gene_id in ordered]
     y_true = np.array([int(labels[gene_id]) for gene_id in gene_ids])
     y_score = np.array([scores.get(gene_id, 0.0) for gene_id in gene_ids])
     n_scored = sum(1 for gene_id in gene_ids if gene_id in scores)
@@ -188,15 +177,29 @@ def subset_vectors(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate DeepBGC per-gene scores on NG")
-    parser.add_argument("--deepbgc-glob", nargs="+", required=True,
-                        help="DeepBGC *.full.gbk output files (glob supported)")
+    parser = argparse.ArgumentParser(
+        description="Evaluate DeepBGC per-gene scores on NG"
+    )
+    parser.add_argument(
+        "--deepbgc-glob",
+        nargs="+",
+        required=True,
+        help="DeepBGC *.full.gbk output files (glob supported)",
+    )
     parser.add_argument("--out", required=True, help="Metrics JSON output path")
-    parser.add_argument("--our-scores", nargs="*", default=[],
-                        help="Optional eval_ng --dump-gene-scores .npz files; adds a paired "
-                             "comparison on the genes DeepBGC scored")
-    parser.add_argument("--gene-table", type=str, default="",
-                        help="Also write a per-gene CSV (labels, DeepBGC score, each our-scores file)")
+    parser.add_argument(
+        "--our-scores",
+        nargs="*",
+        default=[],
+        help="Optional eval_ng --dump-gene-scores .npz files; adds a paired "
+        "comparison on the genes DeepBGC scored",
+    )
+    parser.add_argument(
+        "--gene-table",
+        type=str,
+        default="",
+        help="Also write a per-gene CSV (labels, DeepBGC score, each our-scores file)",
+    )
     args = parser.parse_args()
 
     paths: list[str] = []
@@ -213,9 +216,12 @@ def main() -> None:
     raw_scores = load_deepbgc_scores(paths)
     scores = remap_locus_tags(raw_scores, locus_tag_to_gene_id)
     unmatched = len(raw_scores) - len(scores)
-    print(f"  DeepBGC scored {len(scores):,} / {len(genes):,} genes; "
-          f"{len(genes) - len(scores):,} genes have no Pfam-derived score; "
-          f"{unmatched:,} score tags not in the NG gene set", flush=True)
+    print(
+        f"  DeepBGC scored {len(scores):,} / {len(genes):,} genes; "
+        f"{len(genes) - len(scores):,} genes have no Pfam-derived score; "
+        f"{unmatched:,} score tags not in the NG gene set",
+        flush=True,
+    )
 
     result: dict = {
         "source": "DeepBGC 0.1.23 deepbgc detector (official pickle, v0.1.0 data release)",
@@ -227,12 +233,11 @@ def main() -> None:
 
     scored_ids = set(scores)
     our_columns: dict[str, dict[str, float]] = {}
-    for mode in ("unique_genes", "stride128_positions"):
-        y_true, y_score, n_scored = score_vectors(order, labels, scores, mode)
-        block = evaluate_block(y_true, y_score)
-        block["n_scored_units"] = int(n_scored)
-        block["missing_score_imputed"] = 0.0
-        result[mode] = block
+    y_true, y_score, n_scored = score_vectors(order, labels, scores)
+    block = evaluate_block(y_true, y_score)
+    block["n_scored_units"] = int(n_scored)
+    block["missing_score_imputed"] = 0.0
+    result["unique_genes"] = block
 
     unique_ids = [gene_id for ordered in order.values() for gene_id in ordered]
     subset = subset_vectors(unique_ids, labels, scores)
@@ -246,8 +251,11 @@ def main() -> None:
         data = np.load(Path(path).expanduser(), allow_pickle=False)
         ours = {str(g): float(s) for g, s in zip(data["gene_ids"], data["scores"])}
         our_columns[Path(path).expanduser().parent.name] = ours
-        common = [gene_id for gene_id in unique_ids
-                  if gene_id in scored_ids and gene_id in ours]
+        common = [
+            gene_id
+            for gene_id in unique_ids
+            if gene_id in scored_ids and gene_id in ours
+        ]
         if not common:
             print(f"  {path}: no overlapping scored genes, skipped", flush=True)
             continue
@@ -257,7 +265,9 @@ def main() -> None:
         ours_block = evaluate_block(y_true, np.array([ours[g] for g in common]))
         deepbgc_block.pop("threshold_curve", None)
         ours_block.pop("threshold_curve", None)
-        result.setdefault("paired_subset", {})[f"{dump_path.parent.name}/{dump_path.name}"] = {
+        result.setdefault("paired_subset", {})[
+            f"{dump_path.parent.name}/{dump_path.name}"
+        ] = {
             "n_genes": len(common),
             "n_pos": int(y_true.sum()),
             "deepbgc": deepbgc_block,
@@ -265,19 +275,23 @@ def main() -> None:
         }
 
     print("\n" + "=" * 100)
-    print(f"  {'block':22s} {'genes':>8s} {'pos':>6s} {'AUROC':>8s} {'AUPRC':>8s} "
-          f"{'AUPRC/preval':>12s} {'Acc@0.5':>8s} {'F1@0.5':>8s} {'MCC@0.5':>8s} "
-          f"{'NGbest':>8s} {'F1/MCC@best':>14s}")
-    for name in ("unique_genes", "stride128_positions", "pfam_subset"):
+    print(
+        f"  {'block':22s} {'genes':>8s} {'pos':>6s} {'AUROC':>8s} {'AUPRC':>8s} "
+        f"{'AUPRC/preval':>12s} {'Acc@0.5':>8s} {'F1@0.5':>8s} {'MCC@0.5':>8s} "
+        f"{'NGbest':>8s} {'F1/MCC@best':>14s}"
+    )
+    for name in ("unique_genes", "pfam_subset"):
         block = result.get(name)
         if not block:
             continue
-        print(f"  {name:22s} {block['n_genes']:>8,} {block['n_pos']:>6,} "
-              f"{block['auroc']:>8.4f} {block['auprc']:>8.4f} "
-              f"{block['auprc_lift']:>12.2f} {block['accuracy']:>8.4f} "
-              f"{block['f1']:>8.4f} {block['mcc']:>8.4f} "
-              f"{block['ng_best_threshold']:>8.2f} "
-              f"{block['ng_best_f1']:>6.3f}/{block['ng_best_mcc']:<6.3f}")
+        print(
+            f"  {name:22s} {block['n_genes']:>8,} {block['n_pos']:>6,} "
+            f"{block['auroc']:>8.4f} {block['auprc']:>8.4f} "
+            f"{block['auprc_lift']:>12.2f} {block['accuracy']:>8.4f} "
+            f"{block['f1']:>8.4f} {block['mcc']:>8.4f} "
+            f"{block['ng_best_threshold']:>8.2f} "
+            f"{block['ng_best_f1']:>6.3f}/{block['ng_best_mcc']:<6.3f}"
+        )
     print("=" * 100)
 
     if args.gene_table:
@@ -285,14 +299,25 @@ def main() -> None:
         gene_table.parent.mkdir(parents=True, exist_ok=True)
         with open(gene_table, "w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
-            writer.writerow(["gene_id", "contig", "locus_tag", "label", "deepbgc_score"]
-                            + list(our_columns))
+            writer.writerow(
+                ["gene_id", "contig", "locus_tag", "label", "deepbgc_score"]
+                + list(our_columns)
+            )
             for gene_id in unique_ids:
                 contig, locus_tag = gene_id.split(":", 1)
-                writer.writerow([gene_id, contig, locus_tag, int(labels[gene_id]),
-                                 f"{scores[gene_id]:.6f}" if gene_id in scores else ""]
-                                + [f"{column[gene_id]:.6f}" if gene_id in column else ""
-                                   for column in our_columns.values()])
+                writer.writerow(
+                    [
+                        gene_id,
+                        contig,
+                        locus_tag,
+                        int(labels[gene_id]),
+                        f"{scores[gene_id]:.6f}" if gene_id in scores else "",
+                    ]
+                    + [
+                        f"{column[gene_id]:.6f}" if gene_id in column else ""
+                        for column in our_columns.values()
+                    ]
+                )
         print(f"  Per-gene table saved → {gene_table}")
 
     out = Path(args.out).expanduser()

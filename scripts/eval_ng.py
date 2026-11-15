@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import warnings
 from collections import defaultdict
 from pathlib import Path
 
@@ -39,10 +40,13 @@ from sklearn.metrics import (
 )
 from tqdm import tqdm
 
-from bgc_gnn.checkpoint import detector_settings, load_checkpoint, validation_threshold
+from bgc_gnn.checkpoint import (
+    load_checkpoint,
+    validate_architecture,
+    validation_threshold,
+)
 from bgc_gnn.dataset import normalize_strand, normalize_translation
-from bgc_gnn.eval import bgc_prophet_postprocess, window_aggregation_weight
-from bgc_gnn.model import BGCDetector, WINDOW_SIZE
+from bgc_gnn.model import WINDOW_SIZE, BGCDetector
 
 # ── paths ───────────────────────────────────────────────────────────────────
 GBK_PATH = Path("data/raw/ng/ClusterFinder_Annotated_Contigs.full.gbk")
@@ -61,6 +65,7 @@ def _metrics_path() -> Path:
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+
 def parse_ng_gbk(gbk_path: Path) -> list[dict]:
     """Parse the 9-genome GBK → list of CDS genes with metadata."""
     print("[1] Parsing GBK ...", flush=True)
@@ -74,17 +79,20 @@ def parse_ng_gbk(gbk_path: Path) -> list[dict]:
             lt = feat.qualifiers.get("locus_tag", [""])[0]
             if not lt:
                 lt = f"__cds_{feature_index}"
-            genes.append({
-                "gene_id": f"{acc}:{lt}",
-                "accession": acc,
-                "organism": org,
-                "locus_tag": lt,
-                "start": int(feat.location.start),
-                "end": int(feat.location.end),
-                "strand": normalize_strand(feat.location.strand),
-                "translation": normalize_translation(
-                    feat.qualifiers.get("translation", [""])[0]),
-            })
+            genes.append(
+                {
+                    "gene_id": f"{acc}:{lt}",
+                    "accession": acc,
+                    "organism": org,
+                    "locus_tag": lt,
+                    "start": int(feat.location.start),
+                    "end": int(feat.location.end),
+                    "strand": normalize_strand(feat.location.strand),
+                    "translation": normalize_translation(
+                        feat.qualifiers.get("translation", [""])[0]
+                    ),
+                }
+            )
     print(f"  → {len(genes):,} CDS genes", flush=True)
     return genes
 
@@ -95,6 +103,7 @@ def load_labels(csv_path: Path, genes: list[dict]) -> dict[str, bool]:
     lt2cluster: dict[str, str] = {}
     with open(csv_path) as f:
         import csv
+
         for row in csv.DictReader(f, delimiter="\t"):
             lt = row["Locus Tag"].strip()
             cluster = row["Cluster ID"].strip()
@@ -108,50 +117,74 @@ def load_labels(csv_path: Path, genes: list[dict]) -> dict[str, bool]:
         labels[g["gene_id"]] = in_bgc
         n_bgc += in_bgc
 
-    print(f"  → {n_bgc:,} BGC genes / {len(genes):,} total ({n_bgc/len(genes)*100:.1f}%)")
+    print(
+        f"  → {n_bgc:,} BGC genes / {len(genes):,} total ({n_bgc / len(genes) * 100:.1f}%)"
+    )
     return labels
 
 
 # ── evaluation ───────────────────────────────────────────────────────────────
 
+
 def load_detector(checkpoint: str, device: torch.device):
     state, metadata = load_checkpoint(checkpoint, device)
-    settings = detector_settings(metadata, EMBEDDING_DIM)
-    model = BGCDetector(**settings).to(device)
+    validate_architecture(metadata)
+    if (
+        metadata.get("checkpoint_kind") != "best"
+        or metadata.get("weight_source") != "ema"
+    ):
+        raise ValueError(
+            "evaluation requires the validation-selected EMA detector checkpoint"
+        )
+    model = BGCDetector().to(device)
     model.load_state_dict(state, strict=True)
     model.eval()
-    return model, metadata, settings
+    return model, metadata
 
 
 def evaluate_model(
-    checkpoint: str, labels: dict[str, bool], device: str = "cuda",
-    stride: int = WINDOW_SIZE, aggregate: str = "none",
-    postprocess: bool = False, max_gap: int = 2, min_genes: int = 3,
-    longest_only: bool = False, metrics_path: str = "",
-    fixed_threshold_metrics_path: str = "", dump_gene_scores: str = "",
+    checkpoint: str,
+    labels: dict[str, bool],
+    device: str = "cuda",
+    metrics_path: str = "",
+    fixed_threshold_metrics_path: str = "",
+    dump_gene_scores: str = "",
 ) -> None:
     """Evaluate using fixed 128-gene windows (same as training)."""
     print("[5] Evaluating model (fixed-window) ...", flush=True)
-    if not 1 <= stride <= WINDOW_SIZE:
-        raise ValueError(f"stride must be in [1, {WINDOW_SIZE}]")
-    if postprocess and aggregate == "none":
-        raise ValueError("BGC-Prophet postprocessing requires overlap aggregation")
+    stride, aggregate = 64, "mean"
     selected_output = Path(metrics_path) if metrics_path else _metrics_path()
-    if fixed_threshold_metrics_path and Path(fixed_threshold_metrics_path).resolve() == selected_output.resolve():
-        raise ValueError("fixed-threshold output must differ from validation-selected output")
+    if (
+        fixed_threshold_metrics_path
+        and Path(fixed_threshold_metrics_path).resolve() == selected_output.resolve()
+    ):
+        raise ValueError(
+            "fixed-threshold output must differ from validation-selected output"
+        )
 
     print("  Loading embeddings ...", flush=True)
     emb_map: dict[str, np.ndarray] = {}
     table = pq.read_table(_embedding_path())
-    for gid, emb in zip(table.column("gene_id").to_pylist(),
-                        table.column("embedding").to_pylist()):
+    for gid, emb in zip(
+        table.column("gene_id").to_pylist(), table.column("embedding").to_pylist()
+    ):
         if gid in labels:
             emb_map[gid] = np.array(emb, dtype=np.float32)
+    missing = set(labels) - emb_map.keys()
+    if missing:
+        warnings.warn(
+            f"NG evaluation excludes {len(missing)} genes without embeddings "
+            f"(including {sum(labels[g] for g in missing)} positives); "
+            "reported metrics cover the remaining genes only.",
+            RuntimeWarning,
+        )
+    if not emb_map:
+        raise ValueError("NG evaluation requires at least one gene embedding")
     print(f"  → {len(emb_map):,} gene embeddings loaded", flush=True)
 
     print("  Loading model ...", flush=True)
     torch_device = torch.device(device if torch.cuda.is_available() else "cpu")
-    model, metadata, _ = load_detector(checkpoint, torch_device)
+    model, metadata = load_detector(checkpoint, torch_device)
     calibrated_threshold, threshold_source = validation_threshold(metadata)
 
     genes = parse_ng_gbk(GBK_PATH)
@@ -162,13 +195,16 @@ def evaluate_model(
     gene_order: dict[str, list[str]] = defaultdict(list)
     for acc, ordered in full_gene_order.items():
         full_gene_order[acc].sort(key=lambda gid: gene_start[gid])
-        gene_order[acc] = [gid for gid in full_gene_order[acc]
-                           if gid in emb_map and gid in labels]
+        gene_order[acc] = [
+            gid for gid in full_gene_order[acc] if gid in emb_map and gid in labels
+        ]
 
     all_scores: list[float] = []
     all_labels: list[int] = []
     all_gene_ids: list[str] = []
-    scores_by_contig: dict[str, tuple[list[float], list[int]]] = defaultdict(lambda: ([], []))
+    scores_by_contig: dict[str, tuple[list[float], list[int]]] = defaultdict(
+        lambda: ([], [])
+    )
     score_sums: dict[str, float] = defaultdict(float)
     score_weights: dict[str, float] = defaultdict(float)
 
@@ -180,42 +216,41 @@ def evaluate_model(
         for start in range(0, n, stride):
             positions = list(range(start, min(start + WINDOW_SIZE, n)))
             if len(positions) < WINDOW_SIZE:
-                # Keep the model window size, but never invent contig adjacency.
                 positions.extend(i % n for i in range(WINDOW_SIZE - len(positions)))
             window_ids = [ordered[position] for position in positions]
 
-            embs = torch.tensor(
-                np.stack([emb_map[gid] for gid in window_ids]), dtype=torch.float32,
-            ).unsqueeze(0).to(torch_device)  # [1, 128, 960]
+            embs = (
+                torch.tensor(
+                    np.stack([emb_map[gid] for gid in window_ids]),
+                    dtype=torch.float32,
+                )
+                .unsqueeze(0)
+                .to(torch_device)
+            )  # [1, 128, 960]
             with torch.no_grad():
                 scores = model(embs)[0].cpu().numpy()
 
             for i, gid in enumerate(window_ids):
                 s = float(scores[i])
-                if aggregate == "none":
-                    all_scores.append(s)
-                    all_labels.append(int(labels[gid]))
-                    all_gene_ids.append(gid)
-                    scores_by_contig[acc][0].append(s)
-                    scores_by_contig[acc][1].append(int(labels[gid]))
-                else:
-                    weight = window_aggregation_weight(i, len(window_ids), aggregate)
-                    score_sums[gid] += weight * s
-                    score_weights[gid] += weight
+                score_sums[gid] += s
+                score_weights[gid] += 1
             window_count += 1
 
-    if aggregate != "none":
-        unique_ids = [gid for ordered in gene_order.values() for gid in ordered]
-        all_scores = [score_sums[gid] / score_weights[gid] for gid in unique_ids]
-        all_labels = [int(labels[gid]) for gid in unique_ids]
-        all_gene_ids = unique_ids
-        for acc, ordered in gene_order.items():
+    unique_ids = [gid for ordered in gene_order.values() for gid in ordered]
+    all_scores = [score_sums[gid] / score_weights[gid] for gid in unique_ids]
+    all_labels = [int(labels[gid]) for gid in unique_ids]
+    all_gene_ids = unique_ids
+    for acc, ordered in gene_order.items():
+        if ordered:
             scores_by_contig[acc] = (
                 [score_sums[gid] / score_weights[gid] for gid in ordered],
                 [int(labels[gid]) for gid in ordered],
             )
-    print(f"  → {window_count} windows evaluated ({len(all_labels):,} genes; "
-          f"stride={stride}, aggregate={aggregate})", flush=True)
+    print(
+        f"  → {window_count} windows evaluated ({len(all_labels):,} genes; "
+        f"stride={stride}, aggregate={aggregate})",
+        flush=True,
+    )
 
     if dump_gene_scores:
         dump_path = Path(dump_gene_scores).expanduser()
@@ -234,11 +269,6 @@ def evaluate_model(
         by_contig = {}
         for acc, (scores, _) in scores_by_contig.items():
             predicted = (np.asarray(scores) >= threshold).astype(np.int32)
-            if postprocess:
-                predicted = bgc_prophet_postprocess(
-                    predicted, max_gap=max_gap, min_genes=min_genes,
-                    longest_only=longest_only,
-                )
             by_contig[acc] = predicted
         return np.concatenate(list(by_contig.values())), by_contig
 
@@ -249,19 +279,18 @@ def evaluate_model(
     n_pos = int(y_true.sum())
     n_neg = len(y_true) - n_pos
     metrics: dict = {
+        "missing_embeddings": len(missing),
+        "missing_positive_genes": sum(labels[g] for g in missing),
         "n_genes": len(y_true),
         "n_pos": n_pos,
         "n_neg": n_neg,
         "n_windows": window_count,
         "stride": stride,
         "aggregate": aggregate,
-        "postprocess": ("bgc_prophet_longest" if longest_only
-                        else "bgc_prophet") if postprocess else "none",
-        "max_gap": max_gap if postprocess else None,
-        "min_genes": min_genes if postprocess else None,
+        "postprocess": "none",
         "threshold": calibrated_threshold,
         "threshold_source": threshold_source,
-        "threshold_metric": metadata.get("validation_threshold_metric", "legacy-default"),
+        "threshold_metric": metadata["validation_threshold_metric"],
         "accuracy": accuracy_score(y_true, y_pred),
         "precision": precision_score(y_true, y_pred, zero_division=0),
         "recall": recall_score(y_true, y_pred, zero_division=0),
@@ -280,7 +309,9 @@ def evaluate_model(
     if fixed_threshold_metrics_path:
         fixed_pred, _ = predictions_at(0.5)
         fixed_metrics = metrics | {
-            "threshold": 0.5, "threshold_source": "fixed", "threshold_metric": "fixed",
+            "threshold": 0.5,
+            "threshold_source": "fixed",
+            "threshold_metric": "fixed",
             "accuracy": float(accuracy_score(y_true, fixed_pred)),
             "precision": float(precision_score(y_true, fixed_pred, zero_division=0)),
             "recall": float(recall_score(y_true, fixed_pred, zero_division=0)),
@@ -289,9 +320,14 @@ def evaluate_model(
         }
         fixed_output = Path(fixed_threshold_metrics_path)
         fixed_output.parent.mkdir(parents=True, exist_ok=True)
-        fixed_output.write_text(json.dumps(fixed_metrics, indent=2) + "\n", encoding="utf-8")
-        print(f"  Fixed 0.5: F1={fixed_metrics['f1']:.4f} "
-              f"MCC={fixed_metrics['mcc']:.4f}; saved to {fixed_output}", flush=True)
+        fixed_output.write_text(
+            json.dumps(fixed_metrics, indent=2) + "\n", encoding="utf-8"
+        )
+        print(
+            f"  Fixed 0.5: F1={fixed_metrics['f1']:.4f} "
+            f"MCC={fixed_metrics['mcc']:.4f}; saved to {fixed_output}",
+            flush=True,
+        )
 
     # Exploratory NG-best threshold scan: diagnostics only, never model selection.
     ng_best_mcc, ng_best_threshold, ng_best_pred = -1.0, 0.5, y_pred
@@ -303,9 +339,6 @@ def evaluate_model(
     metrics["ng_best_threshold"] = ng_best_threshold
     metrics["ng_best_f1"] = f1_score(y_true, ng_best_pred, zero_division=0)
     metrics["ng_best_mcc"] = ng_best_mcc
-    metrics["best_threshold"] = ng_best_threshold
-    metrics["f1_best"] = metrics["ng_best_f1"]
-    metrics["mcc_best"] = ng_best_mcc
 
     print("\n[6] Results", flush=True)
     print("=" * 70, flush=True)
@@ -315,7 +348,10 @@ def evaluate_model(
         print(f"  {k:18s} {metrics[k]:>10}", flush=True)
     for k in ["accuracy", "precision", "recall", "f1", "mcc", "auroc", "auprc"]:
         print(f"  {k:18s} {metrics[k]:>10.4f}", flush=True)
-    print(f"  {'validation threshold':18s} {calibrated_threshold:>10.4f} ({threshold_source})", flush=True)
+    print(
+        f"  {'validation threshold':18s} {calibrated_threshold:>10.4f} ({threshold_source})",
+        flush=True,
+    )
     print(f"  {'NG-best threshold':18s} {ng_best_threshold:>10.4f}", flush=True)
     print(f"  {'NG-best F1':18s} {metrics['ng_best_f1']:>10.4f}", flush=True)
     print(f"  {'NG-best MCC':18s} {ng_best_mcc:>10.4f}", flush=True)
@@ -333,7 +369,9 @@ def evaluate_model(
         else:
             f1_g = 0.0
             auroc_g = 0.5
-        print(f"  {acc[:38]:40s} {len(yt):>8,} {f1_g:>8.4f} {auroc_g:>8.4f}", flush=True)
+        print(
+            f"  {acc[:38]:40s} {len(yt):>8,} {f1_g:>8.4f} {auroc_g:>8.4f}", flush=True
+        )
     print("=" * 70, flush=True)
 
     selected_output.parent.mkdir(parents=True, exist_ok=True)
@@ -342,38 +380,37 @@ def evaluate_model(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate a BGC detector on the NG set")
+    parser = argparse.ArgumentParser(
+        description="Evaluate a BGC detector on the NG set"
+    )
     parser.add_argument("--checkpoint", type=str, required=True)
     parser.add_argument("--device", type=str, default="cuda")
-    parser.add_argument("--metrics-path", type=str, default="",
-                        help="Override metrics output path (default: auto)")
-    parser.add_argument("--fixed-threshold-metrics-path", type=str, default="",
-                        help="Also save fixed 0.5 metrics from the same scores")
-    parser.add_argument("--dump-gene-scores", type=str, default="",
-                        help="Save per-gene (gene_id, score, label) npz for paired comparisons")
-    parser.add_argument("--stride", type=int, default=WINDOW_SIZE,
-                        help="Gene stride between inference windows (1-128)")
-    parser.add_argument("--aggregate", choices=["none", "mean", "center"], default="none",
-                        help="Overlap aggregation; none preserves legacy per-window metrics")
-    parser.add_argument("--bgc-prophet-postprocess", action="store_true",
-                        help="Merge gaps up to 2 genes and remove regions shorter than 3 genes")
-    parser.add_argument("--bgc-prophet-longest-only", action="store_true",
-                        help="Retain only the longest eligible region per contig")
-    parser.add_argument("--max-gap", type=int, default=2)
-    parser.add_argument("--min-genes", type=int, default=3)
+    parser.add_argument(
+        "--metrics-path",
+        type=str,
+        default="",
+        help="Override metrics output path (default: auto)",
+    )
+    parser.add_argument(
+        "--fixed-threshold-metrics-path",
+        type=str,
+        default="",
+        help="Also save fixed 0.5 metrics from the same scores",
+    )
+    parser.add_argument(
+        "--dump-gene-scores",
+        type=str,
+        default="",
+        help="Save per-gene (gene_id, score, label) npz for paired comparisons",
+    )
     args = parser.parse_args()
-    if args.max_gap < 0 or args.min_genes < 1:
-        parser.error("--max-gap must be non-negative and --min-genes must be positive")
-    if args.bgc_prophet_longest_only and not args.bgc_prophet_postprocess:
-        parser.error("--bgc-prophet-longest-only requires --bgc-prophet-postprocess")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     labels = load_labels(CSV_PATH, parse_ng_gbk(GBK_PATH))
     evaluate_model(
-        args.checkpoint, labels, device=args.device, stride=args.stride,
-        aggregate=args.aggregate, postprocess=args.bgc_prophet_postprocess,
-        max_gap=args.max_gap, min_genes=args.min_genes,
-        longest_only=args.bgc_prophet_longest_only,
+        args.checkpoint,
+        labels,
+        device=args.device,
         metrics_path=args.metrics_path,
         fixed_threshold_metrics_path=args.fixed_threshold_metrics_path,
         dump_gene_scores=args.dump_gene_scores,

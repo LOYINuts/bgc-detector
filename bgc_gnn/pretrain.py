@@ -1,4 +1,4 @@
-"""Weak (supervised-window) pretraining of the detector on frozen ESMC embeddings.
+"""Pretraining of the detector on labeled windows and frozen ESMC embeddings.
 
 Trains the final detector architecture on audited antiSMASH windows with the
 same pos-weighted BCE the detector uses, selecting by pretraining validation
@@ -9,7 +9,7 @@ Usage
 -----
     uv run python -m bgc_gnn.pretrain \
         --data-dir data/derived/pretraining/antismash_v2_v1 \
-        --cache-dir data/derived/pretraining/as566_v3_cache \
+        --cache-dir data/derived/pretraining/antismash_v2_v1_restart_v2_cache \
         --output-dir runs/pretrain_seed1301 --seed 1301
 """
 
@@ -17,21 +17,30 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
-from pathlib import Path
 import random
+from pathlib import Path
 
 import numpy as np
 import pyarrow.parquet as pq
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 from bgc_gnn.checkpoint import file_fingerprint, runtime_metadata, save_checkpoint
-from bgc_gnn.model import WINDOW_SIZE, BGCDetector
+from bgc_gnn.model import (
+    ARCHITECTURE,
+    DROPOUT,
+    EMBEDDING_DIM,
+    HEAD_DROPOUT,
+    WINDOW_SIZE,
+    BGCDetector,
+)
 
-EMBEDDING_DIM = 960
+EPOCHS = 30
+PATIENCE = 5
+BATCH_SIZE = 32
+LR = 1e-4
 COLUMNS = ("sequence_ids", "valid_mask", "detect_mask", "loss_mask")
 
 
@@ -41,7 +50,11 @@ class PretrainingDataset(Dataset):
         ids = json.loads((cache_dir / "sequence_ids.json").read_text())
         self.index = {s: i for i, s in enumerate(ids)}
         self.values = np.load(cache_dir / "embeddings.npy", mmap_mode="r")
-        if len(ids) != len(self.index) or self.values.ndim != 2 or len(ids) != len(self.values):
+        if (
+            len(ids) != len(self.index)
+            or self.values.ndim != 2
+            or len(ids) != len(self.values)
+        ):
             raise ValueError("cache IDs/embedding shape mismatch")
         self.dim = self.values.shape[1]
         self.positive = 0
@@ -50,18 +63,30 @@ class PretrainingDataset(Dataset):
             for row in batch.to_pylist():
                 valid = row["valid_mask"]
                 if any(len(row[k]) != WINDOW_SIZE for k in COLUMNS):
-                    raise ValueError(f"windows must have {WINDOW_SIZE} aligned positions")
+                    raise ValueError(
+                        f"windows must have {WINDOW_SIZE} aligned positions"
+                    )
                 length = sum(valid)
-                if not length or valid != [True] * length + [False] * (WINDOW_SIZE - length):
+                if not length or valid != [True] * length + [False] * (
+                    WINDOW_SIZE - length
+                ):
                     raise ValueError("windows require non-empty valid prefixes")
-                if any(active and sid not in self.index
-                       for sid, active in zip(row["sequence_ids"], valid)):
+                if any(
+                    active and sid not in self.index
+                    for sid, active in zip(row["sequence_ids"], valid)
+                ):
                     raise ValueError("valid window gene missing from cache")
-                if any(supervised and not active
-                       for supervised, active in zip(row["loss_mask"], valid)):
+                if any(
+                    supervised and not active
+                    for supervised, active in zip(row["loss_mask"], valid)
+                ):
                     raise ValueError("loss mask includes padding")
-                self.positive += sum(t and m for t, m in zip(row["detect_mask"], row["loss_mask"]))
-                self.negative += sum(not t and m for t, m in zip(row["detect_mask"], row["loss_mask"]))
+                self.positive += sum(
+                    t and m for t, m in zip(row["detect_mask"], row["loss_mask"])
+                )
+                self.negative += sum(
+                    not t and m for t, m in zip(row["detect_mask"], row["loss_mask"])
+                )
 
     def __len__(self):
         return len(self.rows)
@@ -73,25 +98,27 @@ class PretrainingDataset(Dataset):
         x[:length] = self.values[[self.index[s] for s in row["sequence_ids"][:length]]]
         return {
             "embeddings": torch.from_numpy(x),
-            **{k: torch.tensor(row[k], dtype=torch.bool)
-               for k in ("valid_mask", "detect_mask", "loss_mask")},
+            **{
+                k: torch.tensor(row[k], dtype=torch.bool)
+                for k in ("valid_mask", "detect_mask", "loss_mask")
+            },
         }
 
 
-def weak_loss(detector, x, valid, targets, supervised):
+def pretraining_loss(detector, x, valid, targets, supervised):
     if (supervised & ~valid).any():
-        raise ValueError("weak loss mask includes padding")
+        raise ValueError("pretraining loss mask includes padding")
     if not supervised.any():
         return None
     probabilities = detector(x, key_padding_mask=~valid)
     per_gene = F.binary_cross_entropy(probabilities, targets.float(), reduction="none")
-    weights = torch.where(targets, 2., 1.)
+    weights = torch.where(targets, 2.0, 1.0)
     return (per_gene * weights)[supervised].mean()
 
 
 def epoch(model, loader, device, optimizer=None):
     model.train(optimizer is not None)
-    total = 0.
+    total = 0.0
     count = 0
     with torch.set_grad_enabled(optimizer is not None):
         for batch in loader:
@@ -100,7 +127,9 @@ def epoch(model, loader, device, optimizer=None):
             if not torch.isfinite(x).all():
                 raise ValueError("non-finite input embeddings")
             supervised = batch["loss_mask"].to(device)
-            loss = weak_loss(model, x, valid, batch["detect_mask"].to(device), supervised)
+            loss = pretraining_loss(
+                model, x, valid, batch["detect_mask"].to(device), supervised
+            )
             n = int(supervised.sum())
             if loss is None:
                 continue
@@ -109,7 +138,7 @@ def epoch(model, loader, device, optimizer=None):
             if optimizer is not None:
                 optimizer.zero_grad()
                 loss.backward()
-                nn.utils.clip_grad_norm_(model.parameters(), 1.)
+                nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
             total += loss.item() * n
             count += n
@@ -124,15 +153,10 @@ def main():
     p.add_argument("--cache-dir", type=Path, required=True)
     p.add_argument("--output-dir", type=Path, required=True)
     p.add_argument("--seed", type=int, default=1301)
-    p.add_argument("--epochs", type=int, default=30)
-    p.add_argument("--patience", type=int, default=5)
-    p.add_argument("--batch-size", type=int, default=32)
-    p.add_argument("--lr", type=float, default=1e-4)
     p.add_argument("--device", default="cuda:0")
     a = p.parse_args()
-    if a.output_dir.exists() or min(a.epochs, a.patience, a.batch_size) < 1 \
-            or not math.isfinite(a.lr) or a.lr <= 0:
-        p.error("use a fresh output directory and positive finite training settings")
+    if a.output_dir.exists():
+        p.error("use a fresh output directory")
 
     audit = json.loads((a.data_dir / "audit.json").read_text())
     cache = json.loads((a.cache_dir / "metadata.json").read_text())
@@ -140,11 +164,23 @@ def main():
         p.error("requires completed data and embedding cache")
     inputs = {}
     for role, path, expected in [
-        ("train", a.data_dir / "windows_train.parquet", audit["windows_train.parquet"]["sha256"]),
-        ("val", a.data_dir / "windows_val.parquet", audit["windows_val.parquet"]["sha256"]),
+        (
+            "train",
+            a.data_dir / "windows_train.parquet",
+            audit["windows_train.parquet"]["sha256"],
+        ),
+        (
+            "val",
+            a.data_dir / "windows_val.parquet",
+            audit["windows_val.parquet"]["sha256"],
+        ),
         ("proteins", a.data_dir / "proteins.parquet", cache["proteins"]["sha256"]),
         ("embeddings", a.cache_dir / "embeddings.npy", cache["embeddings"]["sha256"]),
-        ("sequence_ids", a.cache_dir / "sequence_ids.json", cache["sequence_ids"]["sha256"]),
+        (
+            "sequence_ids",
+            a.cache_dir / "sequence_ids.json",
+            cache["sequence_ids"]["sha256"],
+        ),
     ]:
         inputs[role] = file_fingerprint(path)
         if inputs[role]["sha256"] != expected:
@@ -158,37 +194,43 @@ def main():
     device = torch.device(a.device)
     train = PretrainingDataset(a.data_dir / "windows_train.parquet", a.cache_dir)
     val = PretrainingDataset(a.data_dir / "windows_val.parquet", a.cache_dir)
-    if not len(train) or not len(val) or train.dim != EMBEDDING_DIM or val.dim != EMBEDDING_DIM:
+    if (
+        not len(train)
+        or not len(val)
+        or train.dim != EMBEDDING_DIM
+        or val.dim != EMBEDDING_DIM
+    ):
         p.error("invalid data dimensions or empty split")
     for split in (train, val):
         if not split.positive or not split.negative:
-            p.error("weak training requires positive and background supervision in both splits")
+            p.error(
+                "pretraining requires positive and background supervision in both splits"
+            )
 
-    detector = BGCDetector(
-        d_model=EMBEDDING_DIM, num_layers=2, nhead=15, input_dim=EMBEDDING_DIM,
-        # No semantic skip: the transferred checkpoint carries encoder + head only,
-        # and the zero-initialized skip is added by the downstream detector.
-        semantic_skip=False,
-    ).to(device)
-    train_loader = DataLoader(train, batch_size=a.batch_size, shuffle=True)
-    val_loader = DataLoader(val, batch_size=a.batch_size)
-    optimizer = torch.optim.AdamW(
-        (p for p in detector.parameters() if p.requires_grad), lr=a.lr, weight_decay=.01,
-    )
+    detector = BGCDetector().to(device)
+    train_loader = DataLoader(train, batch_size=BATCH_SIZE, shuffle=True)
+    val_loader = DataLoader(val, batch_size=BATCH_SIZE)
+    optimizer = torch.optim.AdamW(detector.parameters(), lr=LR, weight_decay=0.01)
     metadata = {
         "runtime": runtime_metadata(),
-        "pretraining_method": "weak",
+        "stage": "pretraining",
         "checkpoint_kind": "pretraining_best",
         "inputs": inputs,
         "cache": cache,
-        "architecture": {
-            "model": "convgru", "arch": "channel_gated_conv_gru",
-            "input_dim": EMBEDDING_DIM, "d_model": EMBEDDING_DIM,
-            "num_layers": 2, "nhead": 15, "input_norm": True,
-            "kernel_size": 5, "semantic_skip": False, "context_readout": False,
-            "window_size": WINDOW_SIZE,
+        "architecture": dict(ARCHITECTURE),
+        "settings": {
+            k: str(v) if isinstance(v, Path) else v for k, v in vars(a).items()
+        }
+        | {
+            "epochs": EPOCHS,
+            "patience": PATIENCE,
+            "batch_size": BATCH_SIZE,
+            "lr": LR,
+            "weight_decay": 0.01,
+            "grad_clip_norm": 1.0,
+            "dropout": DROPOUT,
+            "head_dropout": HEAD_DROPOUT,
         },
-        "settings": {k: str(v) if isinstance(v, Path) else v for k, v in vars(a).items()},
         "selection_metric": "pretraining_val_loss",
         "transfer_scope": "detector",
         "limits": audit["limits"],
@@ -198,7 +240,7 @@ def main():
     stale = 0
     history = []
     (a.output_dir / "status.json").write_text(json.dumps({"status": "running"}) + "\n")
-    for e in range(1, a.epochs + 1):
+    for e in range(1, EPOCHS + 1):
         train_loss = epoch(detector, train_loader, device, optimizer)
         # Stable validation, independent of training RNG.
         val_loss = epoch(detector, val_loader, device)
@@ -207,17 +249,22 @@ def main():
         if val_loss < best:
             best = val_loss
             stale = 0
-            save_checkpoint(a.output_dir / "pretrained_best.pt", detector,
-                            metadata | {"epoch": e, "selection_value": best})
+            save_checkpoint(
+                a.output_dir / "pretrained_best.pt",
+                detector,
+                metadata | {"epoch": e, "selection_value": best},
+            )
         else:
             stale += 1
         (a.output_dir / "history.json").write_text(json.dumps(history, indent=2) + "\n")
-        if stale >= a.patience:
+        if stale >= PATIENCE:
             break
     (a.output_dir / "run_metadata.json").write_text(
-        json.dumps(metadata | {"best_val_loss": best}, indent=2) + "\n")
+        json.dumps(metadata | {"best_val_loss": best}, indent=2) + "\n"
+    )
     (a.output_dir / "status.json").write_text(
-        json.dumps({"status": "completed", "epochs": len(history)}) + "\n")
+        json.dumps({"status": "completed", "epochs": len(history)}) + "\n"
+    )
 
 
 if __name__ == "__main__":

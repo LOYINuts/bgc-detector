@@ -19,7 +19,11 @@ def fingerprint(path: Path) -> dict:
 
 def source_position(gene_id: str) -> tuple[str, int]:
     entity, separator, ordinal = gene_id.rpartition(":")
-    if not separator or not ordinal.isdigit() or not entity.startswith(("bgc:", "gtdb:")):
+    if (
+        not separator
+        or not ordinal.isdigit()
+        or not entity.startswith(("bgc:", "gtdb:"))
+    ):
         raise ValueError(f"expected bgc/gtdb source ID with ordinal: {gene_id!r}")
     return entity, int(ordinal)
 
@@ -39,21 +43,26 @@ def audit_windows(path: Path) -> tuple[dict, set[str], Counter]:
         for row in batch.to_pylist():
             ids, mask = row["gene_ids"], row["detect_mask"]
             if not ids or len(ids) != 128 or len(mask) != len(ids):
-                raise ValueError(f"{path}: window {total} must contain 128 genes and labels")
+                raise ValueError(
+                    f"{path}: window {total} must contain 128 genes and labels"
+                )
             if any(not isinstance(value, bool) for value in mask):
                 raise ValueError(f"{path}: window {total} has non-binary labels")
             if row["is_positive"] != any(mask):
                 raise ValueError(f"{path}: window {total} has inconsistent is_positive")
             positions = [source_position(gid) for gid in ids]
             inferred = {
-                i for i in range(1, len(ids))
+                i
+                for i in range(1, len(ids))
                 if positions[i][0] != positions[i - 1][0]
                 or positions[i][1] != positions[i - 1][1] + 1
             }
             if "adjacency_breaks" in row:
                 declared = row["adjacency_breaks"]
                 if declared is None or any(not 1 <= b < len(ids) for b in declared):
-                    raise ValueError(f"{path}: invalid adjacency_breaks at window {total}")
+                    raise ValueError(
+                        f"{path}: invalid adjacency_breaks at window {total}"
+                    )
                 mismatched_breaks += set(declared) != inferred
             namespaces = {entity.split(":", 1)[0] for entity, _ in positions}
             if namespaces == {"bgc"} and not inferred:
@@ -75,15 +84,24 @@ def audit_windows(path: Path) -> tuple[dict, set[str], Counter]:
             total += 1
     entities = {source_position(gid)[0] for gid in genes}
     report = {
-        "file": fingerprint(path), "windows": total, "positive_windows": positive,
-        "negative_windows": total - positive, "unique_genes": len(genes),
-        "entities": {ns: sum(e.startswith(ns + ":") for e in entities) for ns in ("bgc", "gtdb")},
+        "file": fingerprint(path),
+        "windows": total,
+        "positive_windows": positive,
+        "negative_windows": total - positive,
+        "unique_genes": len(genes),
+        "entities": {
+            ns: sum(e.startswith(ns + ":") for e in entities) for ns in ("bgc", "gtdb")
+        },
         "duplicate_window_excess": sum(count - 1 for count in windows.values()),
         "windows_with_repeated_gene_ids": repeated_genes,
         "source_window_counts": dict(sorted(sources.items())),
         "inferred_break_counts": dict(sorted(breaks.items())),
-        "declared_break_mismatch_windows": mismatched_breaks if "adjacency_breaks" in columns else None,
-        "positive_gene_count_histogram": dict(sorted(lengths.items(), key=lambda item: int(item[0]))),
+        "declared_break_mismatch_windows": mismatched_breaks
+        if "adjacency_breaks" in columns
+        else None,
+        "positive_gene_count_histogram": dict(
+            sorted(lengths.items(), key=lambda item: int(item[0]))
+        ),
     }
     return report, genes, windows
 
@@ -98,16 +116,24 @@ def sequence_digest(sequence: str) -> bytes | None:
     return hashlib.sha256(normalized.encode("ascii")).digest() if normalized else None
 
 
-def audit_sequences(catalog: Path, train_genes: set[str], val_genes: set[str], ng_gbk: Path | None) -> dict:
+def audit_sequences(
+    catalog: Path, train_genes: set[str], val_genes: set[str], ng_gbk: Path | None
+) -> dict:
     print("Checking catalog protein sequences ...", flush=True)
     hashes = {"train": set(), "val": set()}
     genes_by_hash = {"train": Counter(), "val": Counter()}
     missing = {"train": set(train_genes), "val": set(val_genes)}
     seen: set[str] = set()
-    for batch in pq.ParquetFile(catalog).iter_batches(columns=["gene_id", "target_aa"], batch_size=8192):
+    for batch in pq.ParquetFile(catalog).iter_batches(
+        columns=["gene_id", "target_aa"], batch_size=8192
+    ):
         for row in batch.to_pylist():
             gid = row["gene_id"]
-            splits = [name for name, ids in (("train", train_genes), ("val", val_genes)) if gid in ids]
+            splits = [
+                name
+                for name, ids in (("train", train_genes), ("val", val_genes))
+                if gid in ids
+            ]
             if not splits:
                 continue
             if gid in seen:
@@ -122,7 +148,9 @@ def audit_sequences(catalog: Path, train_genes: set[str], val_genes: set[str], n
     report = {
         "catalog_file": fingerprint(catalog),
         "normalization": "remove whitespace, uppercase, strip trailing stop markers",
-        "missing_or_empty_catalog_genes": {name: overlap_summary(ids, ids) for name, ids in missing.items()},
+        "missing_or_empty_catalog_genes": {
+            name: overlap_summary(ids, ids) for name, ids in missing.items()
+        },
         "unique_sequences": {name: len(values) for name, values in hashes.items()},
     }
     pairs = [("train", "val")]
@@ -139,7 +167,9 @@ def audit_sequences(catalog: Path, train_genes: set[str], val_genes: set[str], n
                 for feature in record.features:
                     if feature.type != "CDS":
                         continue
-                    digest = sequence_digest(feature.qualifiers.get("translation", [""])[0])
+                    digest = sequence_digest(
+                        feature.qualifiers.get("translation", [""])[0]
+                    )
                     if digest is None:
                         empty += 1
                     else:
@@ -160,17 +190,24 @@ def audit_sequences(catalog: Path, train_genes: set[str], val_genes: set[str], n
     return report
 
 
-def audit_split(train: Path, val: Path, catalog: Path | None = None, ng_gbk: Path | None = None) -> dict:
+def audit_split(
+    train: Path, val: Path, catalog: Path | None = None, ng_gbk: Path | None = None
+) -> dict:
     if ng_gbk is not None and catalog is None:
         raise ValueError("NG sequence audit requires --catalog")
     train_report, train_genes, train_windows = audit_windows(train)
     val_report, val_genes, val_windows = audit_windows(val)
-    entities = [{source_position(gid)[0] for gid in ids} for ids in (train_genes, val_genes)]
+    entities = [
+        {source_position(gid)[0] for gid in ids} for ids in (train_genes, val_genes)
+    ]
     report = {
-        "train": train_report, "val": val_report,
+        "train": train_report,
+        "val": val_report,
         "gene_overlap": overlap_summary(train_genes, val_genes),
         "entity_overlap": {
-            ns: overlap_summary(*[{e for e in values if e.startswith(ns + ":")} for values in entities])
+            ns: overlap_summary(
+                *[{e for e in values if e.startswith(ns + ":")} for values in entities]
+            )
             for ns in ("bgc", "gtdb")
         },
         "cross_split_duplicate_windows": len(train_windows.keys() & val_windows.keys()),
@@ -178,15 +215,24 @@ def audit_split(train: Path, val: Path, catalog: Path | None = None, ng_gbk: Pat
     }
     for name in ("train", "val"):
         r = report[name]
-        print(f"{name}: {r['windows']:,} windows ({r['positive_windows']:,} positive), {r['unique_genes']:,} genes", flush=True)
+        print(
+            f"{name}: {r['windows']:,} windows ({r['positive_windows']:,} positive), {r['unique_genes']:,} genes",
+            flush=True,
+        )
         print(f"  source windows: {r['source_window_counts']}", flush=True)
     print(f"train/val gene overlap: {report['gene_overlap']['count']:,}", flush=True)
     print(f"train/val entity overlap: {report['entity_overlap']}", flush=True)
-    print(f"cross-split duplicate windows: {report['cross_split_duplicate_windows']}", flush=True)
+    print(
+        f"cross-split duplicate windows: {report['cross_split_duplicate_windows']}",
+        flush=True,
+    )
     if catalog is not None:
         report["sequences"] = audit_sequences(catalog, train_genes, val_genes, ng_gbk)
         print(f"sequence overlap: {report['sequences']['overlap']}", flush=True)
-        print(f"missing catalog genes: {report['sequences']['missing_or_empty_catalog_genes']}", flush=True)
+        print(
+            f"missing catalog genes: {report['sequences']['missing_or_empty_catalog_genes']}",
+            flush=True,
+        )
     return report
 
 
@@ -194,8 +240,16 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--train", type=Path, required=True)
     parser.add_argument("--val", type=Path, required=True)
-    parser.add_argument("--catalog", type=Path, help="gene_catalog.parquet for exact protein-sequence checks")
-    parser.add_argument("--ng-gbk", type=Path, help="Optional NG GenBank file for exact sequence overlap")
+    parser.add_argument(
+        "--catalog",
+        type=Path,
+        help="gene_catalog.parquet for exact protein-sequence checks",
+    )
+    parser.add_argument(
+        "--ng-gbk",
+        type=Path,
+        help="Optional NG GenBank file for exact sequence overlap",
+    )
     parser.add_argument("--output", type=Path, help="Optional JSON audit output")
     args = parser.parse_args()
     if args.ng_gbk and not args.catalog:
@@ -203,7 +257,9 @@ def main() -> None:
     report = audit_split(args.train, args.val, args.catalog, args.ng_gbk)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        args.output.write_text(
+            json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
         print(f"Audit saved: {args.output}", flush=True)
 
 

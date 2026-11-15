@@ -1,3 +1,4 @@
+import ast
 import contextlib
 import io
 import tempfile
@@ -11,7 +12,8 @@ import torch
 from torch.optim.swa_utils import AveragedModel, get_ema_multi_avg_fn
 
 from bgc_gnn import train
-from bgc_gnn.checkpoint import load_checkpoint
+from bgc_gnn.checkpoint import load_checkpoint, save_checkpoint
+from bgc_gnn.model import ARCHITECTURE, BGCDetector
 
 
 class TinyDetector(torch.nn.Module):
@@ -19,7 +21,7 @@ class TinyDetector(torch.nn.Module):
         super().__init__()
         self.logit = torch.nn.Parameter(torch.tensor(0.0))
         self.drop = torch.nn.Dropout(0.3)
-        self.register_buffer('fixed', torch.tensor(3))
+        self.register_buffer("fixed", torch.tensor(3))
 
     def forward(self, x, key_padding_mask=None):
         # constant per gene; keeps dropout in the graph to exercise the RNG stream
@@ -28,18 +30,18 @@ class TinyDetector(torch.nn.Module):
 
 def batch(embeddings=None):
     return {
-        'embeddings': torch.zeros(1, 3, 1) if embeddings is None else embeddings,
-        'detect_mask': torch.tensor([[1., 0., 1.]]),
-        'valid_mask': torch.tensor([[1., 1., 0.]]),
-        'is_positive': torch.tensor([True]),
+        "embeddings": torch.zeros(1, 3, 1) if embeddings is None else embeddings,
+        "detect_mask": torch.tensor([[1.0, 0.0, 1.0]]),
+        "valid_mask": torch.tensor([[1.0, 1.0, 0.0]]),
+        "is_positive": torch.tensor([True]),
     }
 
 
 class WeightedBCETest(unittest.TestCase):
     def test_pos_weight_is_applied_and_padding_ignored(self):
         outputs = torch.tensor([[0.5, 0.5, 0.5]])
-        targets = torch.tensor([[1., 0., 0.]])
-        valid = torch.tensor([[1., 1., 0.]])
+        targets = torch.tensor([[1.0, 0.0, 0.0]])
+        valid = torch.tensor([[1.0, 1.0, 0.0]])
         loss = train.weighted_bce(outputs, targets, valid, pos_weight=2.0)
         per_pos = torch.log(torch.tensor(2.0))
         expected = (2 * per_pos + per_pos) / 2
@@ -50,35 +52,54 @@ class WeightedBCETest(unittest.TestCase):
 
         class Recorder(TinyDetector):
             def forward(self, x, key_padding_mask=None):
-                seen['mask'] = key_padding_mask
+                seen["mask"] = key_padding_mask
                 return super().forward(x, key_padding_mask)
 
         loader = [batch()]
-        train.train_epoch(Recorder(), loader, torch.optim.SGD(Recorder().parameters(), lr=.1),
-                          torch.device('cpu'), 1, 1,
-                          AveragedModel(Recorder(), multi_avg_fn=get_ema_multi_avg_fn(.5)))
-        self.assertEqual(seen['mask'].tolist(), [[False, False, True]])
+        model = Recorder()
+        train.train_epoch(
+            model,
+            loader,
+            torch.optim.SGD(model.parameters(), lr=0.1),
+            torch.device("cpu"),
+            1,
+            1,
+            AveragedModel(model, multi_avg_fn=get_ema_multi_avg_fn(0.5)),
+        )
+        self.assertEqual(seen["mask"].tolist(), [[False, False, True]])
 
 
 class EMATrainingTest(unittest.TestCase):
     def test_ema_moves_towards_raw_weights_and_preserves_raw_rng(self):
         baseline, source = TinyDetector(), TinyDetector()
-        ema = AveragedModel(source, multi_avg_fn=get_ema_multi_avg_fn(.5))
+        ema = AveragedModel(source, multi_avg_fn=get_ema_multi_avg_fn(0.5))
         ema.requires_grad_(False)
-        raw_optimizer = torch.optim.SGD(baseline.parameters(), lr=.2)
-        optimizer = torch.optim.SGD(source.parameters(), lr=.2)
+        raw_optimizer = torch.optim.SGD(baseline.parameters(), lr=0.2)
+        optimizer = torch.optim.SGD(source.parameters(), lr=0.2)
         previous = None
         for i in range(3):
             torch.manual_seed(77 + i)
-            train.train_epoch(baseline, [batch()], raw_optimizer, torch.device('cpu'),
-                              1, 1, AveragedModel(baseline, multi_avg_fn=get_ema_multi_avg_fn(.5)))
+            train.train_epoch(
+                baseline,
+                [batch()],
+                raw_optimizer,
+                torch.device("cpu"),
+                1,
+                1,
+                AveragedModel(baseline, multi_avg_fn=get_ema_multi_avg_fn(0.5)),
+            )
             expected_rng = torch.get_rng_state().clone()
             torch.manual_seed(77 + i)
-            train.train_epoch(source, [batch()], optimizer, torch.device('cpu'), 1, 1, ema)
+            train.train_epoch(
+                source, [batch()], optimizer, torch.device("cpu"), 1, 1, ema
+            )
             self.assertTrue(torch.equal(expected_rng, torch.get_rng_state()))
             torch.testing.assert_close(source.logit, baseline.logit, rtol=0, atol=0)
-            expected = (source.logit.detach().clone() if previous is None
-                        else .5 * previous + .5 * source.logit.detach())
+            expected = (
+                source.logit.detach().clone()
+                if previous is None
+                else 0.5 * previous + 0.5 * source.logit.detach()
+            )
             torch.testing.assert_close(ema.module.logit, expected)
             self.assertEqual(ema.n_averaged.item(), i + 1)
             self.assertIsNone(ema.module.logit.grad)
@@ -91,69 +112,147 @@ class EMATrainingTest(unittest.TestCase):
     def test_validation_reads_the_ema_weights(self):
         torch.manual_seed(3)
         model = TinyDetector()
-        ema = AveragedModel(model, multi_avg_fn=get_ema_multi_avg_fn(.999))
+        ema = AveragedModel(model, multi_avg_fn=get_ema_multi_avg_fn(0.999))
         ema.requires_grad_(False)
         with torch.no_grad():
-            ema.module.logit.fill_(5.)
-            model.logit.fill_(-5.)
-        metrics = train.val_epoch(ema.module, [batch()], torch.device('cpu'))
-        raw_metrics = train.val_epoch(model, [batch()], torch.device('cpu'))
+            ema.module.logit.fill_(5.0)
+            model.logit.fill_(-5.0)
+        metrics = train.val_epoch(ema.module, [batch()], torch.device("cpu"))
+        raw_metrics = train.val_epoch(model, [batch()], torch.device("cpu"))
         # targets are [1, 0] at the two valid positions; the confident EMA weights
         # must beat the inverted raw weights on exactly that metric
-        self.assertLess(metrics['val_loss'], raw_metrics['val_loss'])
+        self.assertLess(metrics["val_loss"], raw_metrics["val_loss"])
 
 
 class TrainingRunTest(unittest.TestCase):
     def _dataset(self, root: Path, name: str) -> Path:
         path = root / name
-        pq.write_table(pa.table({
-            'sample_idx': pa.array([0, 1], pa.int32()),
-            'gene_ids': pa.array([['g0', 'g1'], ['g2', 'g3']], pa.list_(pa.string())),
-            'detect_mask': pa.array([[True, True], [False, False]], pa.list_(pa.bool_())),
-            'is_positive': pa.array([True, False], pa.bool_()),
-        }), path)
+        pq.write_table(
+            pa.table(
+                {
+                    "sample_idx": pa.array([0, 1], pa.int32()),
+                    "gene_ids": pa.array(
+                        [["g0", "g1"], ["g2", "g3"]], pa.list_(pa.string())
+                    ),
+                    "detect_mask": pa.array(
+                        [[True, True], [False, False]], pa.list_(pa.bool_())
+                    ),
+                    "is_positive": pa.array([True, False], pa.bool_()),
+                }
+            ),
+            path,
+        )
         return path
 
     def test_run_exports_ema_weights_and_validation_threshold(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            embeddings = root / 'emb.parquet'
-            pq.write_table(pa.table({
-                'gene_id': pa.array([f'g{i}' for i in range(4)], pa.string()),
-                'embedding': pa.array([[0.1] * 8] * 4, pa.list_(pa.float32(), 8)),
-            }), embeddings)
-            train_ds = self._dataset(root, 'train.parquet')
-            val_ds = self._dataset(root, 'val.parquet')
-            checkpoints = root / 'run'
+            embeddings = root / "emb.parquet"
+            pq.write_table(
+                pa.table(
+                    {
+                        "gene_id": pa.array([f"g{i}" for i in range(4)], pa.string()),
+                        "embedding": pa.array(
+                            [[0.1] * 960] * 4, pa.list_(pa.float32(), 960)
+                        ),
+                    }
+                ),
+                embeddings,
+            )
+            train_ds = self._dataset(root, "train.parquet")
+            val_ds = self._dataset(root, "val.parquet")
+            checkpoints = root / "run"
+            source = BGCDetector()
+            with torch.no_grad():
+                source.semantic_skip.weight.fill_(0.01)
+            pretrained = root / "pretrained.pt"
+            save_checkpoint(
+                pretrained,
+                source,
+                {
+                    "architecture": dict(ARCHITECTURE),
+                    "checkpoint_kind": "pretraining_best",
+                    "stage": "pretraining",
+                    "selection_metric": "pretraining_val_loss",
+                    "settings": {"seed": 5},
+                },
+            )
             argv = [
-                'train', '--fixed-dataset', str(train_ds),
-                '--fixed-val-dataset', str(val_ds),
-                '--emb-path', str(embeddings),
-                '--checkpoint-dir', str(checkpoints),
-                '--seed', '5', '--epochs', '2', '--patience', '0',
-                '--num-workers', '0', '--device', 'cpu',
+                "train",
+                "--fixed-dataset",
+                str(train_ds),
+                "--fixed-val-dataset",
+                str(val_ds),
+                "--emb-path",
+                str(embeddings),
+                "--checkpoint-dir",
+                str(checkpoints),
+                "--seed",
+                "5",
+                "--pretrained-checkpoint",
+                str(pretrained),
+                "--num-workers",
+                "0",
+                "--device",
+                "cpu",
             ]
-            with patch('sys.argv', argv), contextlib.redirect_stdout(io.StringIO()):
+            output = io.StringIO()
+            with (
+                patch("sys.argv", argv),
+                patch.object(train, "EPOCHS", 7),
+                contextlib.redirect_stdout(output),
+            ):
                 train.main()
-            state, metadata = load_checkpoint(checkpoints / 'detector_8d_best.pt', 'cpu')
-            self.assertEqual(metadata['checkpoint_kind'], 'best')
-            self.assertEqual(metadata['selection_metric'], 'val_loss')
-            self.assertEqual(metadata['weight_source'], 'ema')
-            self.assertEqual(metadata['architecture']['context_readout'], False)
-            self.assertIn('validation_threshold', metadata)
-            self.assertIn('semantic_skip.weight', state)
-            self.assertFalse(any(key.startswith('context_readout.') for key in state))
-            final = (checkpoints / 'run_metadata.json').read_text()
+            trace = [
+                ast.literal_eval(line.split(": ", 1)[1])
+                for line in output.getvalue().splitlines()
+                if line.startswith("Training learning rates: ")
+            ]
+            self.assertEqual(len(trace), 7)
+            for actual, factor in zip(trace, [1.0, 1.0, 1.0, 1.0, 1.0, 0.95, 0.95**2]):
+                self.assertAlmostEqual(actual[0], 0.0001 * factor)
+                self.assertAlmostEqual(actual[1], 0.0005 * factor)
+            state, metadata = load_checkpoint(
+                checkpoints / "detector_960d_best.pt", "cpu"
+            )
+            self.assertEqual(metadata["checkpoint_kind"], "best")
+            self.assertEqual(metadata["selection_metric"], "val_loss")
+            self.assertEqual(metadata["weight_source"], "ema")
+            self.assertEqual(metadata["architecture"]["context_readout"], False)
+            self.assertIn("validation_threshold", metadata)
+            self.assertIn("semantic_skip.weight", state)
+            self.assertFalse(any(key.startswith("context_readout.") for key in state))
+            final = (checkpoints / "run_metadata.json").read_text()
             self.assertIn('"selected_epoch"', final)
 
-    def test_cli_requires_the_pretrained_scale_checkpoint(self):
-        argv = ['train', '--fixed-dataset', 'a', '--fixed-val-dataset', 'b',
-                '--emb-path', 'c', '--checkpoint-dir', 'd',
-                '--pretrained-encoder-lr-scale', '0.2']
-        with patch('sys.argv', argv), contextlib.redirect_stderr(io.StringIO()), \
-             self.assertRaises(SystemExit):
-            train.main()
+    def test_cli_rejects_recipe_switches(self):
+        for option in [
+            "--context-readout",
+            "--pretrained-encoder-lr-scale",
+            "--epochs",
+            "--patience",
+        ]:
+            argv = [
+                "train",
+                "--fixed-dataset",
+                "a",
+                "--fixed-val-dataset",
+                "b",
+                "--emb-path",
+                "c",
+                "--checkpoint-dir",
+                "d",
+                "--pretrained-checkpoint",
+                "e",
+                option,
+            ]
+            with (
+                patch("sys.argv", argv),
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                train.main()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

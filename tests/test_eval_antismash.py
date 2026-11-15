@@ -40,7 +40,7 @@ ORIGIN
 
 def write_genbank(text: str) -> str:
     seq = "acgt" * 50
-    lines = [seq[i:i + 60] for i in range(0, 200, 60)]
+    lines = [seq[i : i + 60] for i in range(0, 200, 60)]
     body = "\n".join(f"{i * 60 + 1:9d} {line}" for i, line in enumerate(lines))
     handle = tempfile.NamedTemporaryFile("w", suffix=".gbk", delete=False)
     handle.write(text.replace("{seq}", body))
@@ -60,7 +60,9 @@ class AntiSMASHTierTest(unittest.TestCase):
         self.assertEqual(scores["t2"], 0.8)
         self.assertEqual(scores["t3"], 0.7)
         self.assertEqual(scores["t4"], 0.6)
-        self.assertNotIn("t5", scores)  # gene_kind outside every region is no cluster call
+        self.assertNotIn(
+            "t5", scores
+        )  # gene_kind outside every region is no cluster call
 
     def test_region_members_stay_above_the_binary_cut(self) -> None:
         self.assertTrue(all(score > 0.5 for score in self.parsed["scores"].values()))
@@ -78,9 +80,27 @@ class AntiSMASHTierTest(unittest.TestCase):
 class AntiSMASHCoordinateMapTest(unittest.TestCase):
     def setUp(self) -> None:
         self.genes = [
-            {"gene_id": "A:g1", "accession": "A", "locus_tag": "g1", "start": 100, "end": 400},
-            {"gene_id": "A:g2", "accession": "A", "locus_tag": "g2", "start": 500, "end": 800},
-            {"gene_id": "A:g3", "accession": "A", "locus_tag": "g3", "start": 900, "end": 1200},
+            {
+                "gene_id": "A:g1",
+                "accession": "A",
+                "locus_tag": "g1",
+                "start": 100,
+                "end": 400,
+            },
+            {
+                "gene_id": "A:g2",
+                "accession": "A",
+                "locus_tag": "g2",
+                "start": 500,
+                "end": 800,
+            },
+            {
+                "gene_id": "A:g3",
+                "accession": "A",
+                "locus_tag": "g3",
+                "start": 900,
+                "end": 1200,
+            },
         ]
 
     def test_overlapping_cds_transfers_tier(self) -> None:
@@ -93,12 +113,14 @@ class AntiSMASHCoordinateMapTest(unittest.TestCase):
 
     def test_highest_tier_wins_per_gene(self) -> None:
         scores = map_by_coordinates(
-            self.genes, [("A.1", 100, 250, 0.6), ("A.1", 260, 400, 0.9)])
+            self.genes, [("A.1", 100, 250, 0.6), ("A.1", 260, 400, 0.9)]
+        )
         self.assertEqual(scores, {"A:g1": 0.9})
 
     def test_uncovered_gene_and_other_accession_skipped(self) -> None:
         scores = map_by_coordinates(
-            self.genes, [("B.1", 100, 400, 0.9), ("A.1", 1000, 1200, 0.0)])
+            self.genes, [("B.1", 100, 400, 0.9), ("A.1", 1000, 1200, 0.0)]
+        )
         self.assertEqual(scores, {})
 
 

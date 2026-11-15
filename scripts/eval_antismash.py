@@ -23,7 +23,6 @@ deployment numbers, because that is what antiSMASH actually decides.
 Blocks mirror scripts/eval_deepbgc.py so numbers stay comparable:
 
   unique_genes         one score per gene (unit of the overlap stride64/mean entry)
-  stride128_positions  the exact gene-position multiset of the stride128/none entry
   in_region_subset     only genes inside an antiSMASH region (coverage block)
 
 Usage (on the server, project venv):
@@ -38,7 +37,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import argparse
 import glob
@@ -46,13 +44,6 @@ import json
 
 import numpy as np
 from Bio import SeqIO
-
-from eval_deepbgc import (
-    evaluate_block,
-    per_contig_blocks,
-    score_vectors,
-    unique_gene_order,
-)
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
@@ -60,7 +51,14 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
 )
-from eval_ng import CSV_PATH, GBK_PATH, load_labels, parse_ng_gbk
+
+from scripts.eval_deepbgc import (
+    evaluate_block,
+    per_contig_blocks,
+    score_vectors,
+    unique_gene_order,
+)
+from scripts.eval_ng import CSV_PATH, GBK_PATH, load_labels, parse_ng_gbk
 
 GENE_KIND_SCORES = {
     "biosynthetic": 0.90,
@@ -87,19 +85,29 @@ def parse_antismash(paths: list[str]) -> dict[str, dict]:
     gene_kinds: dict[str, str] = {}
     in_region: set[str] = set()
     coordinates: list[tuple[str, int, int, float]] = []
-    diagnostics = {"n_records": 0, "n_regions": 0, "n_protoclusters": 0,
-                   "n_cds": 0, "gene_kind_counts": {}}
+    diagnostics = {
+        "n_records": 0,
+        "n_regions": 0,
+        "n_protoclusters": 0,
+        "n_cds": 0,
+        "gene_kind_counts": {},
+    }
 
     for path in paths:
         for record in SeqIO.parse(path, "genbank"):
             diagnostics["n_records"] += 1
             accession = _base_accession(
-                record.annotations.get("accessions", [record.id])[0])
-            regions = [(int(f.location.start), int(f.location.end))
-                       for f in record.features if f.type == "region"]
+                record.annotations.get("accessions", [record.id])[0]
+            )
+            regions = [
+                (int(f.location.start), int(f.location.end))
+                for f in record.features
+                if f.type == "region"
+            ]
             diagnostics["n_regions"] += len(regions)
-            diagnostics["n_protoclusters"] += sum(1 for f in record.features
-                                                  if f.type == "protocluster")
+            diagnostics["n_protoclusters"] += sum(
+                1 for f in record.features if f.type == "protocluster"
+            )
             for feature in record.features:
                 if feature.type != "CDS":
                     continue
@@ -109,12 +117,15 @@ def parse_antismash(paths: list[str]) -> dict[str, dict]:
                 start, end = int(feature.location.start), int(feature.location.end)
                 # Region borders are offsets, not gene boundaries; a CDS that
                 # straddles a border still belongs to the region.
-                inside = any(start < r_end and end > r_start for r_start, r_end in regions)
+                inside = any(
+                    start < r_end and end > r_start for r_start, r_end in regions
+                )
                 if kind:
                     if locus_tag:
                         gene_kinds[locus_tag] = kind
                     diagnostics["gene_kind_counts"][kind] = (
-                        diagnostics["gene_kind_counts"].get(kind, 0) + 1)
+                        diagnostics["gene_kind_counts"].get(kind, 0) + 1
+                    )
                 # A gene_kind outside every region (e.g. a full-hmmer SecMet domain)
                 # is an annotation, not a cluster call, so it cannot score.
                 tier = GENE_KIND_SCORES.get(kind, REGION_ONLY_SCORE) if inside else 0.0
@@ -126,8 +137,13 @@ def parse_antismash(paths: list[str]) -> dict[str, dict]:
 
     diagnostics["n_in_region"] = len(in_region)
     diagnostics["n_scored"] = len(tiers)
-    return {"scores": tiers, "gene_kinds": gene_kinds, "in_region": in_region,
-            "coordinates": coordinates, "diagnostics": diagnostics}
+    return {
+        "scores": tiers,
+        "gene_kinds": gene_kinds,
+        "in_region": in_region,
+        "coordinates": coordinates,
+        "diagnostics": diagnostics,
+    }
 
 
 def _base_accession(accession: str) -> str:
@@ -135,8 +151,9 @@ def _base_accession(accession: str) -> str:
     return accession.split(".")[0]
 
 
-def map_by_coordinates(genes: list[dict],
-                       coordinates: list[tuple[str, int, int, float]]) -> dict[str, float]:
+def map_by_coordinates(
+    genes: list[dict], coordinates: list[tuple[str, int, int, float]]
+) -> dict[str, float]:
     """Transfer antiSMASH CDS tiers onto NG genes by interval overlap.
 
     Used when antiSMASH ran its own gene calling, so no locus_tag matches. A CDS
@@ -175,8 +192,9 @@ def map_by_coordinates(genes: list[dict],
     return scores
 
 
-def binary_variants(y_true: np.ndarray, scores: np.ndarray,
-                    in_region: np.ndarray) -> dict[str, dict]:
+def binary_variants(
+    y_true: np.ndarray, scores: np.ndarray, in_region: np.ndarray
+) -> dict[str, dict]:
     """Plain binary calls antiSMASH actually makes, per gene."""
     variants = {
         "in_region": in_region > 0,
@@ -199,15 +217,26 @@ def binary_variants(y_true: np.ndarray, scores: np.ndarray,
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate antiSMASH calls on NG")
-    parser.add_argument("--antismash-glob", nargs="+", required=True,
-                        help="antiSMASH output *.gbk files (glob supported)")
+    parser.add_argument(
+        "--antismash-glob",
+        nargs="+",
+        required=True,
+        help="antiSMASH output *.gbk files (glob supported)",
+    )
     parser.add_argument("--out", required=True, help="Metrics JSON output path")
-    parser.add_argument("--our-scores", nargs="*", default=[],
-                        help="Optional eval_ng --dump-gene-scores .npz files; adds a paired "
-                             "comparison on the same genes")
-    parser.add_argument("--map-by-coordinates", action="store_true",
-                        help="Match antiSMASH CDS to NG genes by interval overlap instead of "
-                             "locus_tag (needed when antiSMASH ran its own gene calling)")
+    parser.add_argument(
+        "--our-scores",
+        nargs="*",
+        default=[],
+        help="Optional eval_ng --dump-gene-scores .npz files; adds a paired "
+        "comparison on the same genes",
+    )
+    parser.add_argument(
+        "--map-by-coordinates",
+        action="store_true",
+        help="Match antiSMASH CDS to NG genes by interval overlap instead of "
+        "locus_tag (needed when antiSMASH ran its own gene calling)",
+    )
     args = parser.parse_args()
 
     paths: list[str] = []
@@ -225,43 +254,63 @@ def main() -> None:
     parsed = parse_antismash(paths)
     if args.map_by_coordinates:
         scores = map_by_coordinates(genes, parsed["coordinates"])
-        in_region_ids = {gene_id for gene_id, score in scores.items()
-                         if score >= REGION_ONLY_SCORE}
+        in_region_ids = {
+            gene_id for gene_id, score in scores.items() if score >= REGION_ONLY_SCORE
+        }
         unmatched = parsed["diagnostics"]["n_cds"] - len(scores)
-        print(f"  antiSMASH CDS mapped to {len(scores):,} / {len(genes):,} NG genes by "
-              f"coordinate overlap; {unmatched:,} CDS without an NG gene", flush=True)
+        print(
+            f"  antiSMASH CDS mapped to {len(scores):,} / {len(genes):,} NG genes by "
+            f"coordinate overlap; {unmatched:,} CDS without an NG gene",
+            flush=True,
+        )
         mapping = "coordinates"
     else:
-        scores = {locus_tag_to_gene_id[lt]: score
-                  for lt, score in parsed["scores"].items() if lt in locus_tag_to_gene_id}
+        scores = {
+            locus_tag_to_gene_id[lt]: score
+            for lt, score in parsed["scores"].items()
+            if lt in locus_tag_to_gene_id
+        }
         unmatched = len(parsed["scores"]) - len(scores)
-        in_region_ids = {locus_tag_to_gene_id[lt] for lt in parsed["in_region"]
-                         if lt in locus_tag_to_gene_id}
-        print(f"  antiSMASH scored {len(scores):,} / {len(genes):,} genes; "
-              f"{unmatched:,} scored tags not in the NG gene set", flush=True)
+        in_region_ids = {
+            locus_tag_to_gene_id[lt]
+            for lt in parsed["in_region"]
+            if lt in locus_tag_to_gene_id
+        }
+        print(
+            f"  antiSMASH scored {len(scores):,} / {len(genes):,} genes; "
+            f"{unmatched:,} scored tags not in the NG gene set",
+            flush=True,
+        )
         mapping = "locus_tag"
 
     result: dict = {
-        "source": ("antiSMASH 8.0.4, --taxon bacteria"
-                   + (", own gene calling (prodigal)" if args.map_by_coordinates
-                      else ", --genefinding-tool none (NG CDS reused)")),
+        "source": (
+            "antiSMASH 8.0.4, --taxon bacteria"
+            + (
+                ", own gene calling (prodigal)"
+                if args.map_by_coordinates
+                else ", --genefinding-tool none (NG CDS reused)"
+            )
+        ),
         "gene_mapping": mapping,
-        "score_tiers": {"biosynthetic": GENE_KIND_SCORES["biosynthetic"],
-                        "biosynthetic-additional": GENE_KIND_SCORES["biosynthetic-additional"],
-                        "other|transport|regulatory": PROTOCLUSTER_SCORE,
-                        "in_region_only": REGION_ONLY_SCORE, "outside": 0.0},
+        "score_tiers": {
+            "biosynthetic": GENE_KIND_SCORES["biosynthetic"],
+            "biosynthetic-additional": GENE_KIND_SCORES["biosynthetic-additional"],
+            "other|transport|regulatory": PROTOCLUSTER_SCORE,
+            "in_region_only": REGION_ONLY_SCORE,
+            "outside": 0.0,
+        },
         "fixed_threshold": FIXED_THRESHOLD,
         "n_genes_total": len(genes),
         "n_genes_scored": len(scores),
         "antismash_diagnostics": parsed["diagnostics"],
     }
 
-    for mode in ("unique_genes", "stride128_positions"):
-        y_true, y_score, n_scored = score_vectors(order, labels, scores, mode)
-        block = evaluate_block(y_true, y_score)
-        block["n_scored_units"] = int(n_scored)
-        block["missing_score_imputed"] = 0.0
-        result[mode] = block
+    y_true, y_score, n_scored = score_vectors(order, labels, scores)
+    block = evaluate_block(y_true, y_score)
+    block["n_scored_units"] = int(n_scored)
+    block["missing_score_imputed"] = 0.0
+    result["unique_genes"] = block
 
     unique_ids = [gene_id for ordered in order.values() for gene_id in ordered]
     region_ids = [gene_id for gene_id in unique_ids if gene_id in in_region_ids]
@@ -286,10 +335,14 @@ def main() -> None:
         y_true = np.array([int(labels[gene_id]) for gene_id in common])
         dump_path = Path(path).expanduser()
         ours_block = evaluate_block(y_true, np.array([ours[g] for g in common]))
-        theirs_block = evaluate_block(y_true, np.array([scores.get(g, 0.0) for g in common]))
+        theirs_block = evaluate_block(
+            y_true, np.array([scores.get(g, 0.0) for g in common])
+        )
         ours_block.pop("threshold_curve", None)
         theirs_block.pop("threshold_curve", None)
-        result.setdefault("paired_subset", {})[f"{dump_path.parent.name}/{dump_path.name}"] = {
+        result.setdefault("paired_subset", {})[
+            f"{dump_path.parent.name}/{dump_path.name}"
+        ] = {
             "n_genes": len(common),
             "n_pos": int(y_true.sum()),
             "antismash": theirs_block,
@@ -297,26 +350,38 @@ def main() -> None:
         }
 
     print("\n" + "=" * 100, flush=True)
-    print(f"  {'block':22s} {'genes':>8s} {'pos':>6s} {'AUROC':>8s} {'AUPRC':>8s} "
-          f"{'AUPRC/preval':>12s} {'Acc@0.5':>8s} {'F1@0.5':>8s} {'MCC@0.5':>8s} "
-          f"{'NGbest':>8s} {'F1/MCC@best':>14s}", flush=True)
-    for name in ("unique_genes", "stride128_positions", "in_region_subset"):
+    print(
+        f"  {'block':22s} {'genes':>8s} {'pos':>6s} {'AUROC':>8s} {'AUPRC':>8s} "
+        f"{'AUPRC/preval':>12s} {'Acc@0.5':>8s} {'F1@0.5':>8s} {'MCC@0.5':>8s} "
+        f"{'NGbest':>8s} {'F1/MCC@best':>14s}",
+        flush=True,
+    )
+    for name in ("unique_genes", "in_region_subset"):
         block = result.get(name)
         if not block:
             continue
-        print(f"  {name:22s} {block['n_genes']:>8,} {block['n_pos']:>6,} "
-              f"{block['auroc']:>8.4f} {block['auprc']:>8.4f} "
-              f"{block['auprc_lift']:>12.2f} {block['accuracy']:>8.4f} "
-              f"{block['f1']:>8.4f} {block['mcc']:>8.4f} "
-              f"{block['ng_best_threshold']:>8.2f} "
-              f"{block['ng_best_f1']:>6.3f}/{block['ng_best_mcc']:<6.3f}", flush=True)
+        print(
+            f"  {name:22s} {block['n_genes']:>8,} {block['n_pos']:>6,} "
+            f"{block['auroc']:>8.4f} {block['auprc']:>8.4f} "
+            f"{block['auprc_lift']:>12.2f} {block['accuracy']:>8.4f} "
+            f"{block['f1']:>8.4f} {block['mcc']:>8.4f} "
+            f"{block['ng_best_threshold']:>8.2f} "
+            f"{block['ng_best_f1']:>6.3f}/{block['ng_best_mcc']:<6.3f}",
+            flush=True,
+        )
     print("-" * 100, flush=True)
-    print(f"  {'binary variant':22s} {'pred':>8s} {'Acc':>8s} {'P':>8s} {'R':>8s} "
-          f"{'F1':>8s} {'MCC':>8s}", flush=True)
+    print(
+        f"  {'binary variant':22s} {'pred':>8s} {'Acc':>8s} {'P':>8s} {'R':>8s} "
+        f"{'F1':>8s} {'MCC':>8s}",
+        flush=True,
+    )
     for name, block in result["binary_variants"].items():
-        print(f"  {name:22s} {block['n_predicted']:>8,} {block['accuracy']:>8.4f} "
-              f"{block['precision']:>8.4f} {block['recall']:>8.4f} "
-              f"{block['f1']:>8.4f} {block['mcc']:>8.4f}", flush=True)
+        print(
+            f"  {name:22s} {block['n_predicted']:>8,} {block['accuracy']:>8.4f} "
+            f"{block['precision']:>8.4f} {block['recall']:>8.4f} "
+            f"{block['f1']:>8.4f} {block['mcc']:>8.4f}",
+            flush=True,
+        )
     print("=" * 100, flush=True)
 
     out = Path(args.out).expanduser()

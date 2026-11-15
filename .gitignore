@@ -18,3 +18,5 @@ __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
+# local agent notes, never commit
+AGENTS.md

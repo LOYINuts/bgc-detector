@@ -1,4 +1,4 @@
-"""Checkpoint payloads, provenance helpers and detector settings resolution."""
+"""Checkpoint payloads, provenance helpers and fixed-architecture validation."""
 
 from __future__ import annotations
 
@@ -12,24 +12,17 @@ from typing import Any
 
 import torch
 
-FORMAT_VERSION = 1
+from bgc_gnn.model import ARCHITECTURE
 
-# Constructor defaults for the final recipe; metadata overrides them.
-DETECTOR_DEFAULTS = {
-    "d_model": 960,
-    "num_layers": 2,
-    "nhead": 15,
-    "input_norm": True,
-    "kernel_size": 5,
-    "semantic_skip": True,
-    "context_readout": False,
-}
+FORMAT_VERSION = 1
 
 
 def git_commit() -> str | None:
     try:
         return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL,
+            ["git", "rev-parse", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
         ).strip()
     except (OSError, subprocess.CalledProcessError):
         return None
@@ -48,8 +41,10 @@ def file_fingerprint(path: str | Path) -> dict[str, Any]:
     if not path.is_file():
         return {"path": str(path), "exists": False}
     return {
-        "path": str(path), "exists": True,
-        "size": path.stat().st_size, "sha256": sha256_file(path),
+        "path": str(path),
+        "exists": True,
+        "size": path.stat().st_size,
+        "sha256": sha256_file(path),
     }
 
 
@@ -63,92 +58,91 @@ def runtime_metadata() -> dict[str, Any]:
     }
 
 
-def save_checkpoint(path: str | Path, model: torch.nn.Module,
-                    metadata: dict[str, Any]) -> None:
-    torch.save({
-        "format_version": FORMAT_VERSION,
-        "model_state": model.state_dict(),
-        "metadata": metadata,
-    }, path)
+def save_checkpoint(
+    path: str | Path, model: torch.nn.Module, metadata: dict[str, Any]
+) -> None:
+    torch.save(
+        {
+            "format_version": FORMAT_VERSION,
+            "model_state": model.state_dict(),
+            "metadata": metadata,
+        },
+        path,
+    )
 
 
-def load_checkpoint(path: str | Path,
-                    device: str | torch.device = "cpu") -> tuple[dict[str, Any], dict[str, Any]]:
+def load_checkpoint(
+    path: str | Path, device: str | torch.device = "cpu"
+) -> tuple[dict[str, Any], dict[str, Any]]:
     try:
         torch.serialization.add_safe_globals([torch.torch_version.TorchVersion])
     except AttributeError:
         pass
     payload = torch.load(path, map_location=device, weights_only=True)
-    if "model_state" in payload:
-        return payload["model_state"], payload.get("metadata", {})
-    # Legacy weights have no provenance.
-    return payload, {"format_version": 0, "legacy": True}
+    if (
+        not isinstance(payload, dict)
+        or "model_state" not in payload
+        or "metadata" not in payload
+    ):
+        raise ValueError("requires a detector checkpoint with model_state and metadata")
+    return payload["model_state"], payload["metadata"]
 
 
 def validation_threshold(metadata: dict[str, Any]) -> tuple[float, str]:
-    """Return the saved validation threshold or the legacy 0.5 default."""
+    """Require the validation-MCC threshold exported by the final training recipe."""
     threshold = metadata.get("validation_threshold")
-    if threshold is None:
-        return 0.5, "legacy-default"
-    return float(threshold), str(metadata.get("validation_threshold_source", "validation"))
+    if (
+        threshold is None
+        or not 0 <= float(threshold) <= 1
+        or metadata.get("validation_threshold_source") != "validation"
+        or metadata.get("validation_threshold_metric") != "mcc"
+    ):
+        raise ValueError("requires a finite validation-MCC threshold")
+    return float(threshold), "validation"
 
 
-def detector_settings(metadata: dict[str, Any], embedding_dim: int) -> dict[str, Any]:
-    """Resolve the detector constructor settings recorded in a checkpoint."""
-    architecture = metadata.get("architecture", {}) if not metadata.get("legacy") else {}
-    settings = dict(DETECTOR_DEFAULTS)
-    for key in DETECTOR_DEFAULTS:
-        if key in architecture:
-            settings[key] = architecture[key]
-    settings["input_dim"] = int(architecture.get("input_dim", embedding_dim))
-    return settings
+def validate_architecture(metadata: dict[str, Any]) -> None:
+    """Reject other architectures instead of rebuilding models from metadata."""
+    architecture = metadata.get("architecture", {})
+    cli = metadata.get("cli", {})
+    if architecture.get("symmetric_local_conv", cli.get("symmetric_local_conv", False)):
+        raise ValueError(
+            "checkpoint does not match the fixed architecture: symmetric convolution"
+        )
+    for key, value in ARCHITECTURE.items():
+        # Historical final checkpoints recorded normalization/kernel in cli only.
+        if architecture.get(key, cli.get(key)) != value:
+            raise ValueError(f"checkpoint does not match the fixed architecture: {key}")
 
 
-def initialize_from_pretraining(model: torch.nn.Module, path: str | Path) -> dict[str, Any]:
-    """Transfer verified weak-pretraining detector weights, never task state."""
+def initialize_from_pretraining(
+    model: torch.nn.Module, path: str | Path
+) -> dict[str, Any]:
+    """Transfer the complete pretrained detector, never optimizer or task state."""
     state, metadata = load_checkpoint(path)
-    if (metadata.get("checkpoint_kind") != "pretraining_best"
-            or metadata.get("pretraining_method") != "weak"):
-        raise ValueError("requires a completed weak pretraining_best checkpoint")
+    if (
+        metadata.get("checkpoint_kind") != "pretraining_best"
+        or metadata.get("selection_metric") != "pretraining_val_loss"
+    ):
+        raise ValueError("requires a validation-selected pretraining_best checkpoint")
+    validate_architecture(metadata)
     target = model.state_dict()
-    keys = set(target)
-    source_keys = set(state)
-    # Branches added after the pretraining checkpoint start at exactly zero, so
-    # the transferred detector's initial predictions are unchanged.
-    new_keys = keys - source_keys
-    branches = {
-        "semantic_skip.": {"semantic_skip.weight", "semantic_skip.bias"},
-        "context_readout.": {"context_readout.0.weight", "context_readout.0.bias",
-                            "context_readout.2.weight", "context_readout.2.bias"},
-    }
-    zeroed: dict[str, list[str]] = {}
-    for prefix, expected in branches.items():
-        branch_keys = {k for k in new_keys if k.startswith(prefix)}
-        if not branch_keys:
-            continue
-        if branch_keys != expected:
-            raise ValueError(f"unexpected {prefix} keys in target model")
-        if not all(torch.isfinite(target[k]).all() for k in branch_keys):
-            raise ValueError(f"non-finite {prefix} initialization")
-        if not all(torch.count_nonzero(target[k]) == 0 for k in branch_keys if ".2." in k
-                   or prefix == "semantic_skip."):
-            raise ValueError(f"{prefix} branch must start at zero output")
-        keys -= branch_keys
-        zeroed[prefix] = sorted(branch_keys)
-    if keys != source_keys or not keys:
-        raise ValueError("pretrained architecture keys do not match target")
-    for key in keys:
-        if target[key].shape != state[key].shape or not torch.isfinite(state[key]).all():
+    if set(target) != set(state):
+        raise ValueError(
+            "pretrained weights must contain the complete final detector, including semantic skip"
+        )
+    for key, value in target.items():
+        if value.shape != state[key].shape or not torch.isfinite(state[key]).all():
             raise ValueError(f"incompatible pretrained tensor: {key}")
-    model.load_state_dict(
-        {k: state[k] if k in keys else value for k, value in target.items()},
-        strict=True,
-    )
+    if not torch.count_nonzero(state["semantic_skip.weight"]):
+        raise ValueError(
+            "pretraining checkpoint must contain learned semantic skip weights"
+        )
+    model.load_state_dict(state, strict=True)
     return {
         "checkpoint": file_fingerprint(path),
         "scope": "detector",
-        "method": "weak",
-        "new_zero_initialized_keys": zeroed,
+        "stage": "pretraining",
         "source_metadata": metadata,
     }
 

@@ -7,24 +7,7 @@ from scripts.eval_deepbgc import (
     per_contig_blocks,
     remap_locus_tags,
     score_vectors,
-    window_positions,
 )
-
-
-class DeepBGCWindowTest(unittest.TestCase):
-    def test_full_window_positions(self) -> None:
-        self.assertEqual(window_positions(128), [list(range(128))])
-
-    def test_tail_window_wraps_to_fill(self) -> None:
-        windows = window_positions(130)
-        self.assertEqual(len(windows), 2)
-        self.assertEqual(windows[1][:2], [128, 129])
-        self.assertEqual(windows[1][2], 0)
-        self.assertEqual(len(windows[1]), 128)
-
-    def test_stride_matches_overlap_protocol(self) -> None:
-        windows = window_positions(200, stride=64)
-        self.assertEqual([w[0] for w in windows], [0, 64, 128, 192])
 
 
 class DeepBGCScoreVectorTest(unittest.TestCase):
@@ -34,25 +17,17 @@ class DeepBGCScoreVectorTest(unittest.TestCase):
         self.scores = {"acc:g1": 0.9, "acc:g3": 0.1}
 
     def test_unique_genes_imputes_missing_score_zero(self) -> None:
-        y_true, y_score, n_scored = score_vectors(self.order, self.labels, self.scores, "unique_genes")
+        y_true, y_score, n_scored = score_vectors(self.order, self.labels, self.scores)
         np.testing.assert_array_equal(y_true, [1, 0, 1])
         np.testing.assert_allclose(y_score, [0.9, 0.0, 0.1])
         self.assertEqual(n_scored, 2)
 
-    def test_position_multiset_repeats_tail_genes(self) -> None:
-        y_true, y_score, n_scored = score_vectors(self.order, self.labels, self.scores, "stride128_positions")
-        self.assertEqual(len(y_true), 128)
-        self.assertEqual(n_scored, 128 * 2 // 3)
-
-    def test_unknown_mode_rejected(self) -> None:
-        with self.assertRaises(ValueError):
-            score_vectors(self.order, self.labels, self.scores, "bogus")
-
 
 class DeepBGCRemapTest(unittest.TestCase):
     def test_locus_tags_become_gene_ids(self) -> None:
-        remapped = remap_locus_tags({"SSDG_00780": 0.7, "UNKNOWN": 0.2},
-                                    {"SSDG_00780": "CM000950:SSDG_00780"})
+        remapped = remap_locus_tags(
+            {"SSDG_00780": 0.7, "UNKNOWN": 0.2}, {"SSDG_00780": "CM000950:SSDG_00780"}
+        )
         self.assertEqual(remapped, {"CM000950:SSDG_00780": 0.7})
 
 
