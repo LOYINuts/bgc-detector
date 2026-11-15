@@ -49,7 +49,10 @@ class PretrainingDataset(Dataset):
         self.rows = pq.read_table(windows, columns=list(COLUMNS))
         ids = json.loads((cache_dir / "sequence_ids.json").read_text())
         self.index = {s: i for i, s in enumerate(ids)}
-        self.values = np.load(cache_dir / "embeddings.npy", mmap_mode="r")
+        # Resident, not mmap: gathers from a mapped network-storage cache fault per
+        # page and ran ~150x slower than reading the same rows from RAM.
+        # shortcut: the whole cache must fit in RAM; chunk reads if it ever does not.
+        self.values = np.load(cache_dir / "embeddings.npy")
         if (
             len(ids) != len(self.index)
             or self.values.ndim != 2
