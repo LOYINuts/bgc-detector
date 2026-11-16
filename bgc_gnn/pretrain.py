@@ -45,14 +45,18 @@ COLUMNS = ("sequence_ids", "valid_mask", "detect_mask", "loss_mask")
 
 
 class PretrainingDataset(Dataset):
-    def __init__(self, windows, cache_dir):
+    def __init__(self, windows, cache_dir, values=None):
         self.rows = pq.read_table(windows, columns=list(COLUMNS))
         ids = json.loads((cache_dir / "sequence_ids.json").read_text())
         self.index = {s: i for i, s in enumerate(ids)}
-        # Resident, not mmap: gathers from a mapped network-storage cache fault per
-        # page and ran ~150x slower than reading the same rows from RAM.
+        # Resident, not mmap: a mapped cache faults per gathered page, and every
+        # concurrent process holding a private copy of it pushes the node into
+        # reclaim, where batch collation slows down ~85x. One shared copy per
+        # process is the working point; pass `values` to reuse it across splits.
         # shortcut: the whole cache must fit in RAM; chunk reads if it ever does not.
-        self.values = np.load(cache_dir / "embeddings.npy")
+        self.values = (
+            np.load(cache_dir / "embeddings.npy") if values is None else values
+        )
         if (
             len(ids) != len(self.index)
             or self.values.ndim != 2
@@ -195,8 +199,11 @@ def main():
     np.random.seed(a.seed)
     torch.manual_seed(a.seed)
     device = torch.device(a.device)
-    train = PretrainingDataset(a.data_dir / "windows_train.parquet", a.cache_dir)
-    val = PretrainingDataset(a.data_dir / "windows_val.parquet", a.cache_dir)
+    values = np.load(a.cache_dir / "embeddings.npy")
+    train = PretrainingDataset(
+        a.data_dir / "windows_train.parquet", a.cache_dir, values
+    )
+    val = PretrainingDataset(a.data_dir / "windows_val.parquet", a.cache_dir, values)
     if (
         not len(train)
         or not len(val)
