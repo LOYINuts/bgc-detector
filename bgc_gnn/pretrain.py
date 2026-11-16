@@ -28,7 +28,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset
 
-from bgc_gnn.checkpoint import file_fingerprint, runtime_metadata, save_checkpoint
+from bgc_gnn.checkpoint import runtime_metadata, save_checkpoint
 from bgc_gnn.model import (
     ARCHITECTURE,
     DROPOUT,
@@ -37,6 +37,8 @@ from bgc_gnn.model import (
     WINDOW_SIZE,
     BGCDetector,
 )
+from bgc_gnn.runtime import configure_cpu_threads, prefetch_file
+from bgc_gnn.verify_inputs import verify_inputs
 
 EPOCHS = 30
 PATIENCE = 5
@@ -167,12 +169,19 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--data-dir", type=Path, required=True)
     p.add_argument("--cache-dir", type=Path, required=True)
+    p.add_argument(
+        "--input-verification",
+        type=Path,
+        help="Batch input verification receipt; standalone runs verify all input content",
+    )
     p.add_argument("--output-dir", type=Path, required=True)
     p.add_argument("--seed", type=int, default=1301)
     p.add_argument("--device", default="cuda:0")
     a = p.parse_args()
-    # Match the historical concurrent runs; large CPU pools stall batch collation.
-    torch.set_num_threads(2)
+    try:
+        configure_cpu_threads()
+    except ValueError as exc:
+        p.error(str(exc))
     print(
         f"CPU compute threads: {torch.get_num_threads()}; device: {a.device}",
         flush=True,
@@ -180,36 +189,10 @@ def main():
     if a.output_dir.exists():
         p.error("use a fresh output directory")
 
-    audit = json.loads((a.data_dir / "audit.json").read_text())
-    cache = json.loads((a.cache_dir / "metadata.json").read_text())
-    if audit["status"] != "completed" or cache["status"] != "completed":
-        p.error("requires completed data and embedding cache")
-    inputs = {}
-    for role, path, expected in [
-        (
-            "train",
-            a.data_dir / "windows_train.parquet",
-            audit["windows_train.parquet"]["sha256"],
-        ),
-        (
-            "val",
-            a.data_dir / "windows_val.parquet",
-            audit["windows_val.parquet"]["sha256"],
-        ),
-        ("proteins", a.data_dir / "proteins.parquet", cache["proteins"]["sha256"]),
-        ("embeddings", a.cache_dir / "embeddings.npy", cache["embeddings"]["sha256"]),
-        (
-            "sequence_ids",
-            a.cache_dir / "sequence_ids.json",
-            cache["sequence_ids"]["sha256"],
-        ),
-    ]:
-        print(f"Checking input SHA256: {role} ({path})", flush=True)
-        inputs[role] = file_fingerprint(path)
-        if inputs[role]["sha256"] != expected:
-            p.error(f"input fingerprint mismatch: {role}")
-    if cache["model"] != "biohub/ESMC-300M" or cache["dim"] != EMBEDDING_DIM:
-        p.error("pretraining requires frozen ESMC-300M 960d")
+    try:
+        verified = verify_inputs(a.data_dir, a.cache_dir, a.input_verification)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        p.error(str(exc))
 
     random.seed(a.seed)
     np.random.seed(a.seed)
@@ -219,6 +202,8 @@ def main():
         "Opening read-only embedding mapping and validating dataset windows", flush=True
     )
     values = np.load(a.cache_dir / "embeddings.npy", mmap_mode="r")
+    prefetch = prefetch_file(a.cache_dir / "embeddings.npy")
+    print(f"Embedding read-ahead: {prefetch}", flush=True)
     train = PretrainingDataset(
         a.data_dir / "windows_train.parquet", a.cache_dir, values
     )
@@ -245,8 +230,10 @@ def main():
         | {"cpu_compute_threads": torch.get_num_threads()},
         "stage": "pretraining",
         "checkpoint_kind": "pretraining_best",
-        "inputs": inputs,
-        "cache": cache,
+        "inputs": verified["inputs"],
+        "input_verification": verified["provenance"],
+        "embedding_read_ahead": prefetch,
+        "cache": verified["cache"],
         "architecture": dict(ARCHITECTURE),
         "settings": {
             k: str(v) if isinstance(v, Path) else v for k, v in vars(a).items()
@@ -263,7 +250,7 @@ def main():
         },
         "selection_metric": "pretraining_val_loss",
         "transfer_scope": "detector",
-        "limits": audit["limits"],
+        "limits": verified["audit"]["limits"],
     }
     a.output_dir.mkdir(parents=True)
     best = float("inf")

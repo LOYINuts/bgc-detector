@@ -5,7 +5,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # Historical execution settings: prevent concurrent seeds creating huge CPU pools.
-export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-2}
+export MKL_NUM_THREADS="$OMP_NUM_THREADS" OPENBLAS_NUM_THREADS="$OMP_NUM_THREADS"
 
 SEEDS=(${SEEDS:-1301 1302 1303 1304 1305})
 GPUS=(${GPUS:-0})
@@ -40,6 +41,10 @@ if [ -z "$PRETRAIN_REUSE" ]; then
              "$PT_CACHE/embeddings.npy" "$PT_CACHE/sequence_ids.json"; do
         [ -f "$f" ] || { echo "missing: $f"; exit 1; }
     done
+    mkdir -p "$OUTPUT_ROOT"
+    uv run python -u -m bgc_gnn.verify_inputs \
+        --data-dir "$PT_DATA" --cache-dir "$PT_CACHE" \
+        --output "$OUTPUT_ROOT/pretraining_input_verification.json"
 fi
 
 printf 'Input data root: %s\nOutput root: %s\nTrain: %s\nValidation: %s\n' \
@@ -67,6 +72,7 @@ run_one() {
             # Logs stay outside the fresh output directory created by pretrain.py.
             uv run python -u -m bgc_gnn.pretrain \
                 --data-dir "$PT_DATA" --cache-dir "$PT_CACHE" \
+                --input-verification "$OUTPUT_ROOT/pretraining_input_verification.json" \
                 --output-dir "$pt_dir" --seed "$seed" --device "cuda:${gpu}" \
                 > "$log_dir/pretrain.log" 2>&1 \
                 || { echo "PRETRAIN FAILED: $log_dir/pretrain.log"; return 1; }

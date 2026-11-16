@@ -60,7 +60,11 @@ class EntrypointTest(unittest.TestCase):
     def test_runner_checks_ng_labels_before_launching_pretraining(self):
         self._runner(fail=False, missing_labels=True)
 
-    def _runner(self, fail, historical=False, missing_labels=False):
+    @unittest.skipUnless(shutil.which("bash"), "runner requires bash")
+    def test_two_seed_workers_share_one_batch_verification(self):
+        self._runner(fail=False, two_seeds=True)
+
+    def _runner(self, fail, historical=False, missing_labels=False, two_seeds=False):
         with tempfile.TemporaryDirectory() as tmp:
             t = Path(tmp)
             (t / "scripts").mkdir()
@@ -108,7 +112,12 @@ import json,os,sys
 args=sys.argv[1:]
 assert all(os.environ[k]=='2' for k in ['OMP_NUM_THREADS','MKL_NUM_THREADS','OPENBLAS_NUM_THREADS'])
 def arg(name):return args[args.index(name)+1]
-if 'bgc_gnn.pretrain' in args:
+if 'bgc_gnn.verify_inputs' in args:
+    stage='verify'; output=Path(arg('--output'))
+    assert not output.exists()
+    output.write_text('{}')
+elif 'bgc_gnn.pretrain' in args:
+    assert Path(arg('--input-verification')).is_file()
     stage='pretrain'; output=Path(arg('--output-dir'))
     assert Path(arg('--data-dir')).parent.parent.parent == Path(os.environ['DATA_ROOT'])
     assert not output.exists(), 'runner created output before pretraining'
@@ -156,6 +165,9 @@ with open(os.environ['STAGE_LOG'],'a') as f:f.write(stage+'\\n')
                 "NG_LABELS",
                 "PT_DATA",
                 "PT_CACHE",
+                "OMP_NUM_THREADS",
+                "MKL_NUM_THREADS",
+                "OPENBLAS_NUM_THREADS",
             ]:
                 env.pop(name, None)
             env.update(
@@ -163,8 +175,8 @@ with open(os.environ['STAGE_LOG'],'a') as f:f.write(stage+'\\n')
                 TEST_PYTHON=Path(sys.executable).as_posix(),
                 TEST_WORKER=worker.as_posix(),
                 STAGE_LOG=(t / "stages").as_posix(),
-                SEEDS="1506",
-                GPUS="0",
+                SEEDS="1506 1507" if two_seeds else "1506",
+                GPUS="0 1" if two_seeds else "0",
                 DATA_ROOT=data_root.as_posix(),
                 OUTPUT_ROOT=output_root.as_posix(),
                 EXPECTED_TRAIN=f"{prefix}_train.parquet",
@@ -197,10 +209,14 @@ with open(os.environ['STAGE_LOG'],'a') as f:f.write(stage+'\\n')
                 self.assertNotIn("All seeds completed", p.stdout)
             else:
                 self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
-                self.assertEqual(
-                    (t / "stages").read_text().splitlines(),
-                    ["pretrain", "train", "overlap"],
-                )
+                stages = (t / "stages").read_text().splitlines()
+                if two_seeds:
+                    self.assertEqual(stages[0], "verify")
+                    self.assertEqual(stages.count("verify"), 1)
+                    for stage in ["pretrain", "train", "overlap"]:
+                        self.assertEqual(stages.count(stage), 2)
+                else:
+                    self.assertEqual(stages, ["verify", "pretrain", "train", "overlap"])
 
 
 if __name__ == "__main__":

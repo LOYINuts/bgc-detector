@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -561,6 +562,7 @@ class PretrainingTest(unittest.TestCase):
             with (
                 patch.object(sys, "argv", argv),
                 patch.object(pretrain, "EPOCHS", 1),
+                patch.dict(os.environ, {"OMP_NUM_THREADS": "2"}),
                 contextlib.redirect_stdout(io.StringIO()),
             ):
                 pretrain.main()

@@ -51,6 +51,7 @@ from bgc_gnn.model import (
     HEAD_DROPOUT,
     BGCDetector,
 )
+from bgc_gnn.runtime import configure_cpu_threads
 
 BATCH_SIZE = 64
 LR = 5e-4
@@ -200,7 +201,10 @@ def main() -> None:
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--device", type=str, default="auto")
     args = parser.parse_args()
-    torch.set_num_threads(2)
+    try:
+        configure_cpu_threads()
+    except ValueError as exc:
+        parser.error(str(exc))
     print(f"CPU compute threads: {torch.get_num_threads()}", flush=True)
 
     random.seed(args.seed)
