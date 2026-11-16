@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import time
 from pathlib import Path
 
 import numpy as np
@@ -49,13 +50,11 @@ class PretrainingDataset(Dataset):
         self.rows = pq.read_table(windows, columns=list(COLUMNS))
         ids = json.loads((cache_dir / "sequence_ids.json").read_text())
         self.index = {s: i for i, s in enumerate(ids)}
-        # Resident, not mmap: a mapped cache faults per gathered page, and every
-        # concurrent process holding a private copy of it pushes the node into
-        # reclaim, where batch collation slows down ~85x. One shared copy per
-        # process is the working point; pass `values` to reuse it across splits.
-        # shortcut: the whole cache must fit in RAM; chunk reads if it ever does not.
+        # Share a read-only mapping across splits; never allocate a private full cache.
         self.values = (
-            np.load(cache_dir / "embeddings.npy") if values is None else values
+            np.load(cache_dir / "embeddings.npy", mmap_mode="r")
+            if values is None
+            else values
         )
         if (
             len(ids) != len(self.index)
@@ -127,8 +126,10 @@ def epoch(model, loader, device, optimizer=None):
     model.train(optimizer is not None)
     total = 0.0
     count = 0
+    started = time.perf_counter()
+    stage = "train" if optimizer is not None else "validation"
     with torch.set_grad_enabled(optimizer is not None):
-        for batch in loader:
+        for batch_index, batch in enumerate(loader, 1):
             x = batch["embeddings"].to(device)
             valid = batch["valid_mask"].to(device)
             if not torch.isfinite(x).all():
@@ -149,6 +150,14 @@ def epoch(model, loader, device, optimizer=None):
                 optimizer.step()
             total += loss.item() * n
             count += n
+            if batch_index == 1 or batch_index % 100 == 0 or batch_index == len(loader):
+                elapsed = time.perf_counter() - started
+                print(
+                    f"  {stage} batch {batch_index}/{len(loader)} | "
+                    f"loss={total / count:.6f} | elapsed={elapsed:.1f}s | "
+                    f"batches/s={batch_index / max(elapsed, 1e-9):.2f}",
+                    flush=True,
+                )
     if not count:
         raise ValueError("split has no supervised positions for this task")
     return total / count
@@ -162,6 +171,12 @@ def main():
     p.add_argument("--seed", type=int, default=1301)
     p.add_argument("--device", default="cuda:0")
     a = p.parse_args()
+    # Match the historical concurrent runs; large CPU pools stall batch collation.
+    torch.set_num_threads(2)
+    print(
+        f"CPU compute threads: {torch.get_num_threads()}; device: {a.device}",
+        flush=True,
+    )
     if a.output_dir.exists():
         p.error("use a fresh output directory")
 
@@ -189,6 +204,7 @@ def main():
             cache["sequence_ids"]["sha256"],
         ),
     ]:
+        print(f"Checking input SHA256: {role} ({path})", flush=True)
         inputs[role] = file_fingerprint(path)
         if inputs[role]["sha256"] != expected:
             p.error(f"input fingerprint mismatch: {role}")
@@ -199,7 +215,10 @@ def main():
     np.random.seed(a.seed)
     torch.manual_seed(a.seed)
     device = torch.device(a.device)
-    values = np.load(a.cache_dir / "embeddings.npy")
+    print(
+        "Opening read-only embedding mapping and validating dataset windows", flush=True
+    )
+    values = np.load(a.cache_dir / "embeddings.npy", mmap_mode="r")
     train = PretrainingDataset(
         a.data_dir / "windows_train.parquet", a.cache_dir, values
     )
@@ -222,7 +241,8 @@ def main():
     val_loader = DataLoader(val, batch_size=BATCH_SIZE)
     optimizer = torch.optim.AdamW(detector.parameters(), lr=LR, weight_decay=0.01)
     metadata = {
-        "runtime": runtime_metadata(),
+        "runtime": runtime_metadata()
+        | {"cpu_compute_threads": torch.get_num_threads()},
         "stage": "pretraining",
         "checkpoint_kind": "pretraining_best",
         "inputs": inputs,
@@ -251,6 +271,7 @@ def main():
     history = []
     (a.output_dir / "status.json").write_text(json.dumps({"status": "running"}) + "\n")
     for e in range(1, EPOCHS + 1):
+        print(f"Epoch {e}/{EPOCHS}: starting", flush=True)
         train_loss = epoch(detector, train_loader, device, optimizer)
         # Stable validation, independent of training RNG.
         val_loss = epoch(detector, val_loader, device)

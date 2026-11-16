@@ -106,6 +106,7 @@ class EntrypointTest(unittest.TestCase):
                 """from pathlib import Path
 import json,os,sys
 args=sys.argv[1:]
+assert all(os.environ[k]=='2' for k in ['OMP_NUM_THREADS','MKL_NUM_THREADS','OPENBLAS_NUM_THREADS'])
 def arg(name):return args[args.index(name)+1]
 if 'bgc_gnn.pretrain' in args:
     stage='pretrain'; output=Path(arg('--output-dir'))

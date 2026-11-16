@@ -200,6 +200,8 @@ def main() -> None:
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--device", type=str, default="auto")
     args = parser.parse_args()
+    torch.set_num_threads(2)
+    print(f"CPU compute threads: {torch.get_num_threads()}", flush=True)
 
     random.seed(args.seed)
     np.random.seed(args.seed)

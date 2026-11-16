@@ -528,6 +528,14 @@ class PretrainingTest(unittest.TestCase):
                 )
             )
             dataset = PretrainingDataset(root / "windows_train.parquet", cache)
+            self.assertIsInstance(dataset.values, np.memmap)
+            self.assertFalse(dataset.values.flags.writeable)
+            validation = PretrainingDataset(
+                root / "windows_val.parquet", cache, dataset.values
+            )
+            self.assertIs(validation.values, dataset.values)
+            np.testing.assert_array_equal(validation.values, values)
+            del validation
             self.assertEqual(dataset[0]["embeddings"].shape, (128, 960))
             import torch
 
@@ -565,6 +573,7 @@ class PretrainingTest(unittest.TestCase):
             self.assertTrue(saved["architecture"]["semantic_skip"])
             self.assertFalse(saved["architecture"]["context_readout"])
             self.assertEqual(saved["settings"]["batch_size"], 32)
+            self.assertEqual(saved["runtime"]["cpu_compute_threads"], 2)
             self.assertGreater(float(state["semantic_skip.weight"].abs().sum()), 0)
             target = BGCDetector()
             provenance = initialize_from_pretraining(

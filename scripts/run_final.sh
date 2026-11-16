@@ -4,6 +4,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Historical execution settings: prevent concurrent seeds creating huge CPU pools.
+export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2
+
 SEEDS=(${SEEDS:-1301 1302 1303 1304 1305})
 GPUS=(${GPUS:-0})
 DATA_ROOT=${DATA_ROOT:-data}
