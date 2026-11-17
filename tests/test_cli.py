@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -143,14 +144,16 @@ class CommandLineTest(unittest.TestCase):
             self.assertEqual([r.split("\t")[0] for r in rows[1:4]], ["contigA"] * 3)
             for row in rows[1:]:
                 score, predicted = row.split("\t")[6:8]
-                self.assertEqual(int(predicted), int(float(score) >= 0.7))
+                self.assertEqual(int(predicted), int(float(score) >= 0.5))
 
             provenance = json.loads((outdir / "predict.run1.json").read_text())
-            self.assertEqual(provenance["threshold"], 0.7)
-            self.assertEqual(provenance["threshold_source"], "validation")
+            self.assertEqual(provenance["threshold"], 0.5)
+            self.assertEqual(provenance["threshold_source"], "fixed")
+            self.assertIsNone(provenance["threshold_metric"])
             self.assertEqual(provenance["stride"], 64)
             self.assertEqual(provenance["aggregate"], "mean")
             self.assertEqual(provenance["n_genes"], 133)
+            self.assertEqual(provenance["n_excluded"], 0)
             self.assertEqual(provenance["n_scored"], 133)
             self.assertEqual(provenance["embeddings_from"], "cache")
             self.assertEqual(
@@ -215,7 +218,100 @@ class CommandLineTest(unittest.TestCase):
                 )
             embed.assert_not_called()
 
-    def test_predict_refuses_a_checkpoint_without_validation_threshold(self):
+    def test_predict_can_use_the_checkpoint_validation_threshold(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            genome = root / "genome.gbk"
+            write_genome(genome, [("ctg", 3)])
+            embeddings = root / "emb.parquet"
+            write_embeddings(embeddings, [f"ctg:g{i}" for i in range(3)])
+            checkpoint = root / "detector.pt"
+            write_checkpoint(checkpoint, threshold=0.7)
+            with contextlib.redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "predict",
+                        "--genome",
+                        str(genome),
+                        "--checkpoint",
+                        str(checkpoint),
+                        "--outdir",
+                        str(root / "out"),
+                        "--emb-cache",
+                        str(embeddings),
+                        "--device",
+                        "cpu",
+                        "--threshold",
+                        "checkpoint",
+                    ]
+                )
+            provenance = json.loads((root / "out/predict.json").read_text())
+            self.assertEqual(provenance["threshold"], 0.7)
+            self.assertEqual(provenance["threshold_source"], "validation")
+            self.assertEqual(provenance["threshold_metric"], "mcc")
+
+    def test_predict_rejects_a_threshold_outside_the_unit_interval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            genome = root / "genome.gbk"
+            write_genome(genome, [("ctg", 2)])
+            embeddings = root / "emb.parquet"
+            write_embeddings(embeddings, ["ctg:g0", "ctg:g1"])
+            checkpoint = root / "detector.pt"
+            write_checkpoint(checkpoint)
+            with (
+                contextlib.redirect_stderr(io.StringIO()) as err,
+                self.assertRaises(SystemExit),
+            ):
+                main(
+                    [
+                        "predict",
+                        "--genome",
+                        str(genome),
+                        "--checkpoint",
+                        str(checkpoint),
+                        "--outdir",
+                        str(root / "out"),
+                        "--emb-cache",
+                        str(embeddings),
+                        "--device",
+                        "cpu",
+                        "--threshold",
+                        "1.5",
+                    ]
+                )
+            self.assertIn("within [0, 1]", err.getvalue())
+
+    def test_predict_without_esm_and_without_cache_reports_a_clean_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            genome = root / "genome.gbk"
+            write_genome(genome, [("ctg", 2)])
+            checkpoint = root / "detector.pt"
+            write_checkpoint(checkpoint)
+            with (
+                patch.dict(sys.modules, {"esm": None, "esm.models.esmc": None}),
+                contextlib.redirect_stderr(io.StringIO()) as err,
+                contextlib.redirect_stdout(io.StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                main(
+                    [
+                        "predict",
+                        "--genome",
+                        str(genome),
+                        "--checkpoint",
+                        str(checkpoint),
+                        "--outdir",
+                        str(root / "out"),
+                        "--device",
+                        "cpu",
+                    ]
+                )
+            self.assertIn("requires the esm package", err.getvalue())
+            self.assertNotIn("Traceback", err.getvalue())
+
+    def test_predict_refuses_checkpoint_threshold_when_it_is_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             genome = root / "genome.gbk"
@@ -241,6 +337,8 @@ class CommandLineTest(unittest.TestCase):
                         str(embeddings),
                         "--device",
                         "cpu",
+                        "--threshold",
+                        "checkpoint",
                     ]
                 )
             self.assertIn("validation-MCC threshold", err.getvalue())

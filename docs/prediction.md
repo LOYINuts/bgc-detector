@@ -32,8 +32,8 @@ checkpoint: runs/final_seed1506/detector_960d_best.pt
   threshold: 0.690058 (source=validation, metric=mcc)
 ```
 
-阈值就存在 checkpoint 里，读取时会强制校验它存在、来自验证集、按 MCC 选出；缺失直接报错，
-不会回退到 0.5。
+阈值本身也存在 checkpoint 里。`predict` 默认用 0.5；加 `--threshold checkpoint` 才改用它，
+读取时强制校验该阈值存在、来自验证集、按 MCC 选出，缺失则报错而不是静默回退。
 
 ### 预测一个基因组
 
@@ -43,11 +43,14 @@ uv run bgc-detector predict \
   --checkpoint runs/final_seed1506/detector_960d_best.pt \
   --device cuda:0 \
   --outdir output --name myrun \
+  --threshold checkpoint \
   --emb-cache output/myrun.emb.parquet
 ```
 
 - 输入：带 `CDS` 与 `translation` 的 GenBank（antiSMASH / ClusterFinder 注释均可）
 - 每条 contig 按基因起点排序，128 基因窗口、stride 64、尾部环绕补满，被覆盖窗口取 mean
+- 判定阈值：默认 0.5（`threshold_source=fixed`）；`--threshold checkpoint` 用 checkpoint 的验证
+  MCC 阈值（`threshold_source=validation`），也可以直接给一个 0–1 之间的数
 - 输出两件事：
   - `output/predict.myrun.genes.tsv`：`contig, gene_id, locus_tag, start, end, strand, score, predicted`
   - `output/predict.myrun.json`：溯源（genome/checkpoint 的 sha256、阈值及其来源、窗口/聚合参数、
@@ -60,7 +63,7 @@ uv run bgc-detector predict \
 窗口打分与 GenBank 解析已抽到 `bgc_gnn/predict.py`，`scripts/eval_ng.py` 与 CLI 调用同一个
 函数，因此不存在"预测一套、评测另一套"的风险。
 
-实测核对（seed 1506 checkpoint、NG 九基因组、同一份 NG embedding）：
+实测核对（seed 1506 checkpoint、NG 九基因组、同一份 NG embedding、`--threshold checkpoint`）：
 
 | 项 | 结果 |
 | --- | --- |

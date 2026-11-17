@@ -18,7 +18,14 @@ KERNELS = [SDPBackend.EFFICIENT_ATTENTION, SDPBackend.FLASH_ATTENTION, SDPBacken
 
 def load_model(device):
     """Load ESMC via biohub's esm package."""
-    from esm.models.esmc import EsmcModel, EsmcTokenizer
+    try:
+        from esm.models.esmc import EsmcModel, EsmcTokenizer
+    except ImportError as exc:  # the CLI reports this without a traceback
+        raise ValueError(
+            "computing embeddings requires the esm package "
+            '(uv add "esm @ git+https://github.com/Biohub/esm.git"); '
+            "pass --emb-cache to score a genome that is already embedded"
+        ) from exc
 
     model = EsmcModel.from_pretrained(ESMC_MODEL, dtype=torch.bfloat16).to(device)
     tokenizer = EsmcTokenizer.from_pretrained(ESMC_MODEL)

@@ -19,7 +19,10 @@ from bgc_gnn.predict import STRIDE, gene_order, load_detector, mean_scores, pars
 
 def _device(name: str | None) -> torch.device:
     if name:
-        return torch.device(name)
+        device = torch.device(name)
+        if device.type == "cuda" and not torch.cuda.is_available():
+            raise ValueError("CUDA is not available; pass --device cpu")
+        return device
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -73,10 +76,20 @@ def info(args: argparse.Namespace) -> None:
     )
 
 
+def _threshold(value: str, metadata: dict) -> tuple[float, str]:
+    """Default 0.5; 'checkpoint' uses the validation-MCC threshold of the checkpoint."""
+    if value == "checkpoint":
+        return validation_threshold(metadata)
+    threshold = float(value)
+    if not 0 <= threshold <= 1:
+        raise ValueError(f"threshold must be within [0, 1], got {value}")
+    return threshold, "fixed"
+
+
 def predict(args: argparse.Namespace) -> None:
     device = _device(args.device)
     model, metadata = load_detector(args.checkpoint, device)
-    threshold, threshold_source = validation_threshold(metadata)
+    threshold, threshold_source = _threshold(args.threshold, metadata)
 
     genes = parse_gbk(args.genome)
     if not genes:
@@ -144,7 +157,11 @@ def predict(args: argparse.Namespace) -> None:
         "checkpoint_epoch": metadata.get("epoch"),
         "threshold": threshold,
         "threshold_source": threshold_source,
-        "threshold_metric": metadata.get("validation_threshold_metric"),
+        "threshold_metric": (
+            metadata.get("validation_threshold_metric")
+            if threshold_source == "validation"
+            else None
+        ),
         "window": 128,
         "stride": STRIDE,
         "aggregate": "mean",
@@ -152,8 +169,9 @@ def predict(args: argparse.Namespace) -> None:
         "esmc_model": "biohub/ESMC-300M",
         "embedding_dim": EMBEDDING_DIM,
         "embeddings_from": "cache" if reused_embeddings else "computed",
-        "n_genes": len(rows),
+        "n_genes": len(genes),
         "n_scored": len(scores),
+        "n_excluded": len(excluded),
         "n_windows": windows,
         "n_predicted": sum(int(scores[gid] >= threshold) for _, gid in rows),
         "code_commit": git_commit(),
@@ -197,6 +215,12 @@ def main(argv: list[str] | None = None) -> None:
         help="reuse this gene embedding parquet, and write it when computing",
     )
     predict_parser.add_argument("--max-toks", type=int, default=MAX_TOKS)
+    predict_parser.add_argument(
+        "--threshold",
+        default="0.5",
+        help="decision threshold in [0, 1], or 'checkpoint' to use the validation "
+        "threshold stored in the checkpoint (default: 0.5)",
+    )
     predict_parser.set_defaults(handler=predict)
 
     args = parser.parse_args(argv)
