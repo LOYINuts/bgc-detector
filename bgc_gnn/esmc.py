@@ -16,21 +16,48 @@ MAX_TOKS = 8192  # tokens per inference batch; sequence lengths are bucketed
 KERNELS = [SDPBackend.EFFICIENT_ATTENTION, SDPBackend.FLASH_ATTENTION, SDPBackend.MATH]
 
 
+def _esmc_classes():
+    """The package renamed EsmcModel/EsmcTokenizer -> ESMC/EsmSequenceTokenizer."""
+    hint = (
+        "computing embeddings requires the esm package "
+        '(uv add "esm @ git+https://github.com/Biohub/esm.git"); '
+        "pass --emb-cache to score a genome that is already embedded"
+    )
+    try:
+        from esm.models.esmc import ESMC as model_cls
+    except ImportError:
+        try:
+            from esm.models.esmc import EsmcModel as model_cls
+        except ImportError as exc:  # no esm at all, or an unknown API
+            raise ValueError(hint) from exc
+    try:
+        from esm.tokenization import EsmSequenceTokenizer as tokenizer_cls
+    except ImportError:
+        try:
+            from esm.models.esmc import EsmcTokenizer as tokenizer_cls
+        except ImportError as exc:
+            raise ValueError(hint) from exc
+    return model_cls, tokenizer_cls
+
+
 def load_model(device):
     """Load ESMC via biohub's esm package."""
-    try:
-        from esm.models.esmc import EsmcModel, EsmcTokenizer
-    except ImportError as exc:  # the CLI reports this without a traceback
-        raise ValueError(
-            "computing embeddings requires the esm package "
-            '(uv add "esm @ git+https://github.com/Biohub/esm.git"); '
-            "pass --emb-cache to score a genome that is already embedded"
-        ) from exc
-
-    model = EsmcModel.from_pretrained(ESMC_MODEL, dtype=torch.bfloat16).to(device)
-    tokenizer = EsmcTokenizer.from_pretrained(ESMC_MODEL)
+    model_cls, tokenizer_cls = _esmc_classes()
+    model = model_cls.from_pretrained(ESMC_MODEL, dtype=torch.bfloat16).to(device)
+    tokenizer = tokenizer_cls.from_pretrained(ESMC_MODEL)
     model.eval()
     return model, tokenizer
+
+
+def last_hidden(out: object) -> torch.Tensor:
+    """Hidden states from either output shape: last_hidden_state or hidden_states[-1]."""
+    hidden = getattr(out, "last_hidden_state", None)
+    if hidden is None:
+        states = getattr(out, "hidden_states", None)
+        hidden = states[-1] if isinstance(states, (tuple, list)) else states
+    if hidden is None:
+        raise ValueError("ESMC output carries no hidden states")
+    return hidden
 
 
 def pool_batch(hidden: torch.Tensor, attn_mask: torch.Tensor) -> np.ndarray:
@@ -55,7 +82,7 @@ def embed_sequences(
     model, tokenizer = load_model(device)
     lens = [len(s) + 2 for s in sequences]  # + BOS/EOS, no truncation
     order = sorted(range(len(sequences)), key=lambda i: lens[i])
-    out = np.zeros((len(sequences), EMBEDDING_DIM), dtype=np.float32)
+    embeddings = np.zeros((len(sequences), EMBEDDING_DIM), dtype=np.float32)
     idx = 0
     while idx < len(order):
         tokens = 0
@@ -72,7 +99,7 @@ def embed_sequences(
         )
         attn = enc["attention_mask"].to(device)
         with torch.inference_mode(), sdpa_kernel(KERNELS):
-            hidden = model(input_ids=enc["input_ids"].to(device), attention_mask=attn)
-        out[batch] = pool_batch(hidden.last_hidden_state, attn)
-        del hidden
-    return out
+            result = model(input_ids=enc["input_ids"].to(device), attention_mask=attn)
+        embeddings[batch] = pool_batch(last_hidden(result), attn)
+        del result
+    return embeddings

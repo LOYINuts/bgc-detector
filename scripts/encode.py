@@ -31,6 +31,7 @@ from bgc_gnn.esmc import (
     EMBEDDING_DIM,
     ESMC_MODEL,
     KERNELS,
+    last_hidden,
     load_model,
     pool_batch,
 )
@@ -172,7 +173,7 @@ def run(
             sdpa_kernel(KERNELS),
         ):
             out = model_obj(input_ids=input_ids, attention_mask=attn)
-        hidden = out.last_hidden_state  # [B, T, D]
+        hidden = last_hidden(out)  # [B, T, D]
 
         embs = pool_batch(hidden, enc["attention_mask"])
         buffer_gids.extend(r["gene_id"] for r in batch_rows)
