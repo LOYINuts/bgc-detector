@@ -4,9 +4,6 @@ version = "1.0.0"
 description = "Per-gene BGC detection from frozen ESMC gene embeddings (final model only)"
 readme = "README.md"
 requires-python = ">=3.12"
-
-[project.scripts]
-bgc-detector = "bgc_gnn.cli:main"
 dependencies = [
     "biopython>=1.87",
     "numpy>=2.5.0",
@@ -15,6 +12,16 @@ dependencies = [
     "torch>=2.12.1",
     "tqdm>=4.68.3",
 ]
+
+[project.scripts]
+bgc-detector = "bgc_gnn.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["bgc_gnn"]
 
 [tool.uv.sources]
 torch = [
