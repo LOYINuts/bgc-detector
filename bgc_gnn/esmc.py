@@ -10,7 +10,8 @@ import numpy as np
 import torch
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
-ESMC_MODEL = "biohub/ESMC-300M"
+ESMC_MODEL = "biohub/ESMC-300M"  # HF repo id, used by older esm releases
+ESMC_REGISTRY_NAME = "esmc_300m"  # current esm local model registry
 EMBEDDING_DIM = 960
 MAX_TOKS = 8192  # tokens per inference batch; sequence lengths are bucketed
 KERNELS = [SDPBackend.EFFICIENT_ATTENTION, SDPBackend.FLASH_ATTENTION, SDPBackend.MATH]
@@ -43,12 +44,15 @@ def _esmc_classes():
 def load_model(device):
     """Load ESMC via biohub's esm package."""
     model_cls, tokenizer_cls = _esmc_classes()
-    try:
+    try:  # current release: local registry name, device instead of dtype
+        model = model_cls.from_pretrained(
+            ESMC_REGISTRY_NAME, device=torch.device(device)
+        )
+        tokenizer = tokenizer_cls.from_pretrained(ESMC_REGISTRY_NAME)
+    except (TypeError, ValueError):  # older release: HF repo id plus dtype
         model = model_cls.from_pretrained(ESMC_MODEL, dtype=torch.bfloat16)
-    except TypeError:  # current signature: (model_name, device, use_flash_attn)
-        model = model_cls.from_pretrained(ESMC_MODEL, device=torch.device(device))
+        tokenizer = tokenizer_cls.from_pretrained(ESMC_MODEL)
     model = model.to(device)
-    tokenizer = tokenizer_cls.from_pretrained(ESMC_MODEL)
     model.eval()
     return model, tokenizer
 
