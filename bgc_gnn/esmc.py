@@ -43,7 +43,11 @@ def _esmc_classes():
 def load_model(device):
     """Load ESMC via biohub's esm package."""
     model_cls, tokenizer_cls = _esmc_classes()
-    model = model_cls.from_pretrained(ESMC_MODEL, dtype=torch.bfloat16).to(device)
+    try:
+        model = model_cls.from_pretrained(ESMC_MODEL, dtype=torch.bfloat16)
+    except TypeError:  # current signature: (model_name, device, use_flash_attn)
+        model = model_cls.from_pretrained(ESMC_MODEL, device=torch.device(device))
+    model = model.to(device)
     tokenizer = tokenizer_cls.from_pretrained(ESMC_MODEL)
     model.eval()
     return model, tokenizer
