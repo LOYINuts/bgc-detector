@@ -135,7 +135,7 @@ def predict(args: argparse.Namespace) -> None:
             score = scores[gid]
             stream.write(
                 f"{accession}\t{gid}\t{gene['locus_tag']}\t{gene['start']}\t{gene['end']}\t"
-                f"{gene['strand']}\t{score:.6f}\t{int(score >= threshold)}\n"
+                f"{gene['strand']}\t{score:.9g}\t{int(score >= threshold)}\n"
             )
 
     provenance = {
