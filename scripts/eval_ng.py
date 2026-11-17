@@ -28,7 +28,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 import pyarrow.parquet as pq
 import torch
-from Bio import SeqIO
 from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
@@ -38,15 +37,19 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
-from tqdm import tqdm
 
-from bgc_gnn.checkpoint import (
-    load_checkpoint,
-    validate_architecture,
-    validation_threshold,
+from bgc_gnn.checkpoint import validation_threshold
+from bgc_gnn.predict import (
+    STRIDE,
+    load_detector,
+    mean_scores,
 )
-from bgc_gnn.dataset import normalize_strand, normalize_translation
-from bgc_gnn.model import WINDOW_SIZE, BGCDetector
+from bgc_gnn.predict import (
+    gene_order as contig_order,
+)
+from bgc_gnn.predict import (
+    parse_gbk as parse_ng_gbk,
+)
 
 # ── paths ───────────────────────────────────────────────────────────────────
 GBK_PATH = Path("data/raw/ng/ClusterFinder_Annotated_Contigs.full.gbk")
@@ -60,37 +63,6 @@ def _embedding_path() -> Path:
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
-
-
-def parse_ng_gbk(gbk_path: Path) -> list[dict]:
-    """Parse the 9-genome GBK → list of CDS genes with metadata."""
-    print("[1] Parsing GBK ...", flush=True)
-    genes: list[dict] = []
-    for record in tqdm(SeqIO.parse(str(gbk_path), "genbank"), desc="  contigs"):
-        acc = record.annotations.get("accessions", [record.id])[0]
-        org = record.annotations.get("organism", "?")
-        for feature_index, feat in enumerate(record.features):
-            if feat.type != "CDS":
-                continue
-            lt = feat.qualifiers.get("locus_tag", [""])[0]
-            if not lt:
-                lt = f"__cds_{feature_index}"
-            genes.append(
-                {
-                    "gene_id": f"{acc}:{lt}",
-                    "accession": acc,
-                    "organism": org,
-                    "locus_tag": lt,
-                    "start": int(feat.location.start),
-                    "end": int(feat.location.end),
-                    "strand": normalize_strand(feat.location.strand),
-                    "translation": normalize_translation(
-                        feat.qualifiers.get("translation", [""])[0]
-                    ),
-                }
-            )
-    print(f"  → {len(genes):,} CDS genes", flush=True)
-    return genes
 
 
 def load_labels(csv_path: Path, genes: list[dict]) -> dict[str, bool]:
@@ -122,22 +94,6 @@ def load_labels(csv_path: Path, genes: list[dict]) -> dict[str, bool]:
 # ── evaluation ───────────────────────────────────────────────────────────────
 
 
-def load_detector(checkpoint: str, device: torch.device):
-    state, metadata = load_checkpoint(checkpoint, device)
-    validate_architecture(metadata)
-    if (
-        metadata.get("checkpoint_kind") != "best"
-        or metadata.get("weight_source") != "ema"
-    ):
-        raise ValueError(
-            "evaluation requires the validation-selected EMA detector checkpoint"
-        )
-    model = BGCDetector().to(device)
-    model.load_state_dict(state, strict=True)
-    model.eval()
-    return model, metadata
-
-
 def evaluate_model(
     checkpoint: str,
     labels: dict[str, bool],
@@ -150,7 +106,7 @@ def evaluate_model(
 ) -> None:
     """Evaluate using fixed 128-gene windows (same as training)."""
     print("[5] Evaluating model (fixed-window) ...", flush=True)
-    stride, aggregate = 64, "mean"
+    stride, aggregate = STRIDE, "mean"
     selected_output = (
         Path(metrics_path)
         if metrics_path
@@ -190,16 +146,7 @@ def evaluate_model(
     calibrated_threshold, threshold_source = validation_threshold(metadata)
 
     genes = parse_ng_gbk(ng_gbk)
-    full_gene_order: dict[str, list[str]] = defaultdict(list)
-    for g in genes:
-        full_gene_order[g["accession"]].append(g["gene_id"])
-    gene_start = {g["gene_id"]: g["start"] for g in genes}
-    gene_order: dict[str, list[str]] = defaultdict(list)
-    for acc, ordered in full_gene_order.items():
-        full_gene_order[acc].sort(key=lambda gid: gene_start[gid])
-        gene_order[acc] = [
-            gid for gid in full_gene_order[acc] if gid in emb_map and gid in labels
-        ]
+    gene_order = contig_order(genes, set(emb_map) & set(labels))
 
     all_scores: list[float] = []
     all_labels: list[int] = []
@@ -207,45 +154,16 @@ def evaluate_model(
     scores_by_contig: dict[str, tuple[list[float], list[int]]] = defaultdict(
         lambda: ([], [])
     )
-    score_sums: dict[str, float] = defaultdict(float)
-    score_weights: dict[str, float] = defaultdict(float)
 
-    window_count = 0
-    for acc in tqdm(gene_order, desc="  contigs"):
-        ordered = gene_order[acc]
-        n = len(ordered)
-        # Tail wrap-around keeps the fixed window protocol.
-        for start in range(0, n, stride):
-            positions = list(range(start, min(start + WINDOW_SIZE, n)))
-            if len(positions) < WINDOW_SIZE:
-                positions.extend(i % n for i in range(WINDOW_SIZE - len(positions)))
-            window_ids = [ordered[position] for position in positions]
-
-            embs = (
-                torch.tensor(
-                    np.stack([emb_map[gid] for gid in window_ids]),
-                    dtype=torch.float32,
-                )
-                .unsqueeze(0)
-                .to(torch_device)
-            )  # [1, 128, 960]
-            with torch.no_grad():
-                scores = model(embs)[0].cpu().numpy()
-
-            for i, gid in enumerate(window_ids):
-                s = float(scores[i])
-                score_sums[gid] += s
-                score_weights[gid] += 1
-            window_count += 1
-
+    scores, window_count = mean_scores(model, emb_map, gene_order, torch_device)
     unique_ids = [gid for ordered in gene_order.values() for gid in ordered]
-    all_scores = [score_sums[gid] / score_weights[gid] for gid in unique_ids]
+    all_scores = [scores[gid] for gid in unique_ids]
     all_labels = [int(labels[gid]) for gid in unique_ids]
     all_gene_ids = unique_ids
     for acc, ordered in gene_order.items():
         if ordered:
             scores_by_contig[acc] = (
-                [score_sums[gid] / score_weights[gid] for gid in ordered],
+                [scores[gid] for gid in ordered],
                 [int(labels[gid]) for gid in ordered],
             )
     print(

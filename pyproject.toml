@@ -4,6 +4,9 @@ version = "1.0.0"
 description = "Per-gene BGC detection from frozen ESMC gene embeddings (final model only)"
 readme = "README.md"
 requires-python = ">=3.12"
+
+[project.scripts]
+bgc-detector = "bgc_gnn.cli:main"
 dependencies = [
     "biopython>=1.87",
     "numpy>=2.5.0",

@@ -20,31 +20,24 @@ import time
 from datetime import timedelta
 from pathlib import Path
 
-import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
-from torch.nn.attention import SDPBackend, sdpa_kernel
+from torch.nn.attention import sdpa_kernel
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from bgc_gnn.dataset import normalize_strand, normalize_translation
-
-ESMC_MODEL = "biohub/ESMC-300M"
-EMBEDDING_DIM = 960
+from bgc_gnn.esmc import (
+    EMBEDDING_DIM,
+    ESMC_MODEL,
+    KERNELS,
+    load_model,
+    pool_batch,
+)
 
 NG_GBK = Path("data/raw/ng/ClusterFinder_Annotated_Contigs.full.gbk")
 NG_OUT_DIR = Path("data/derived/ng_embeddings")
 SOURCES = ("catalog", "ng")
-
-
-def load_model(device):
-    """Load ESMC via biohub's esm package (architecture is not in transformers)."""
-    from esm.models.esmc import EsmcModel, EsmcTokenizer
-
-    m = EsmcModel.from_pretrained(ESMC_MODEL, dtype=torch.bfloat16).to(device)
-    tok = EsmcTokenizer.from_pretrained(ESMC_MODEL)
-    m.eval()
-    return m, tok
 
 
 def load_catalog_rows(catalog_dir: Path) -> list[dict]:
@@ -86,19 +79,6 @@ def load_ng_rows(ng_gbk: Path) -> list[dict]:
                 }
             )
     return rows
-
-
-def pool_batch(hidden: torch.Tensor, attn_mask: torch.Tensor) -> np.ndarray:
-    """Mean-pool a whole batch over residues (BOS/EOS excluded) in one shot."""
-    B, T, _ = hidden.shape
-    pos = torch.arange(T, device=hidden.device)
-    base = attn_mask.to(hidden.device).bool()
-    n_valid = base.sum(dim=1, keepdim=True)  # includes BOS+EOS
-    w = base & (pos >= 1) & (pos < n_valid - 1)
-    w = w | (~w.any(dim=1, keepdim=True) & base)  # degenerate: all valid
-    w = w.to(hidden.dtype)
-    w = w / w.sum(dim=1, keepdim=True)
-    return (hidden * w.unsqueeze(-1)).sum(dim=1).float().cpu().numpy()
 
 
 def output_path(source: str, emb_dim: int, catalog_dir: Path, ng_out_dir: Path) -> Path:
@@ -189,13 +169,7 @@ def run(
         attn = enc["attention_mask"].to(device)
         with (
             torch.inference_mode(),
-            sdpa_kernel(
-                [
-                    SDPBackend.EFFICIENT_ATTENTION,
-                    SDPBackend.FLASH_ATTENTION,
-                    SDPBackend.MATH,
-                ]
-            ),
+            sdpa_kernel(KERNELS),
         ):
             out = model_obj(input_ids=input_ids, attention_mask=attn)
         hidden = out.last_hidden_state  # [B, T, D]
