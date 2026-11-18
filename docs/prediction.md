@@ -10,12 +10,19 @@ uv sync --locked                     # 仓库环境
 export HF_HOME=/home/gonghang/hfhome # 需要新算 embedding 时复用已有 ESMC-300M 权重
 ```
 
-`predict` 只有在需要**现算** embedding 时才依赖 `esm` 包（Biohub 的 ESMC 实现，不在
-transformers 里）。只给现成 parquet 打分不需要它。要装就是同一份来源：
+`predict` 只有在需要**现算** embedding 时才依赖 `transformers`：ESMC-300M 是 transformers
+原生架构（`ESMCModel`），训练时的冻结嵌入也是用这份权重算的。只给现成 parquet 打分不需要它。
 
 ```bash
-uv add "esm @ git+https://github.com/Biohub/esm.git@26b0bc2b771e3e419ea74f445a5f35cc094a1509"
+uv pip install transformers    # 或装进运行 CLI 的那个环境
+export HF_HOME=/path/to/huggingface
+export HF_HUB_OFFLINE=1        # 只用本地缓存
 ```
+
+注意不要用 Biohub 的 `esm` 包加载这份权重：它的本地注册表指向另一套布局
+（`esmc-300m-2024-12` 的 `data/`），硬套 safetensors 会出现 308 个缺失、398 个多余张量，
+模型大部分随机初始化——用它算出的嵌入与训练用的完全不同（实测 max |Δ| 4.45，而参考量级
+只有 0.0155）。
 
 ## 子命令
 
@@ -77,9 +84,27 @@ uv run bgc-detector predict \
 注意 `eval_ng` 的 dump 存的是 float32，而 TSV 写的是 float64 的窗口均值，所以原始数字可能
 差半个 float32 ULP；判定与指标不受影响。
 
-## 尚未验证
+## 现算 embedding 的实测
 
-用真实 ESMC 现算 embedding 这条路只做了单元测试（用桩替换 `embed_sequences`），没有在服务器
-上跑过真模型。启用前应先做一次一致性检查：取一小批已知基因现算 embedding，与冻结 parquet
-比对最大绝对差。ESMC 缺少 `xformers`/`flash-attn` 时会退回 PyTorch SDPA，bf16 注意力归约
-顺序与融合内核不同，理论上会有微小差异，需要实测确认后再声称"与训练时同分布"。
+用 transformers + 本地 ESMC-300M 权重（bf16）重算 NG 里 40 个基因的嵌入，与训练用的冻结
+parquet 比对：
+
+| 项 | 值 |
+| --- | --- |
+| max abs diff | 0.0037 |
+| mean abs diff | 1.5e-4 |
+| 参考量级（分量绝对值均值） | 0.0155 |
+| 模型 | `ESMCModel`，332M 参数 |
+
+差异来自 bf16 注意力归约顺序（未装 xformers/flash-attn 时走 PyTorch SDPA），量级约为分量
+均值 1% 的平均误差、最大 24%。用于预测足够，但不能声称逐位相同。
+
+## 端到端行为检查（两个 NCBI 下载的基因组）
+
+| 基因组 | 基因数 | 判为 BGC | 比例 | 预测出的区域数 |
+| --- | --- | --- | --- | --- |
+| *Mycoplasmoides genitalium* G37（无已知 BGC） | 504 | 0 | 0.00% | 0 |
+| *Streptomyces coelicolor* A3(2)（BGC 丰富） | 7,593 | 284 | 3.74% | 26（最大 41/33/24/23/23/21 个基因） |
+
+coelicolor 预测出的 26 个连续区域与文献报道的约 25–30 个 BGC 数量级相符，被判阳性的基因
+中位分数 0.9966；阴性对照一个都没判。

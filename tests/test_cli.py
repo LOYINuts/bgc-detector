@@ -282,7 +282,7 @@ class CommandLineTest(unittest.TestCase):
                 )
             self.assertIn("within [0, 1]", err.getvalue())
 
-    def test_predict_without_esm_and_without_cache_reports_a_clean_error(self):
+    def test_predict_without_transformers_and_without_cache_reports_a_clean_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             genome = root / "genome.gbk"
@@ -290,7 +290,7 @@ class CommandLineTest(unittest.TestCase):
             checkpoint = root / "detector.pt"
             write_checkpoint(checkpoint)
             with (
-                patch.dict(sys.modules, {"esm": None, "esm.models.esmc": None}),
+                patch.dict(sys.modules, {"transformers": None}),
                 contextlib.redirect_stderr(io.StringIO()) as err,
                 contextlib.redirect_stdout(io.StringIO()),
                 self.assertRaises(SystemExit),
@@ -308,7 +308,7 @@ class CommandLineTest(unittest.TestCase):
                         "cpu",
                     ]
                 )
-            self.assertIn("requires the esm package", err.getvalue())
+            self.assertIn("requires transformers", err.getvalue())
             self.assertNotIn("Traceback", err.getvalue())
 
     def test_predict_refuses_checkpoint_threshold_when_it_is_missing(self):

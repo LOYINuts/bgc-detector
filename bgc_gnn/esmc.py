@@ -1,59 +1,42 @@
 """Frozen ESMC-300M (960d) per-protein mean-pooled embeddings.
 
-The architecture lives in biohub's ``esm`` package, not in transformers, so it is
-imported lazily: scoring an already embedded genome must not require it.
+ESMC is a native transformers architecture (``ESMCModel``), so the weights used to
+train this detector load directly from the cached snapshot; the older ``esm``
+package expects a different weight layout and produces wrong embeddings.
 """
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import torch
-from torch.nn.attention import SDPBackend, sdpa_kernel
 
-ESMC_MODEL = "biohub/ESMC-300M"  # HF repo id, used by older esm releases
-ESMC_REGISTRY_NAME = "esmc_300m"  # current esm local model registry
+ESMC_MODEL = "biohub/ESMC-300M"
 EMBEDDING_DIM = 960
 MAX_TOKS = 8192  # tokens per inference batch; sequence lengths are bucketed
-KERNELS = [SDPBackend.EFFICIENT_ATTENTION, SDPBackend.FLASH_ATTENTION, SDPBackend.MATH]
-
-
-def _esmc_classes():
-    """The package renamed EsmcModel/EsmcTokenizer -> ESMC/EsmSequenceTokenizer."""
-    hint = (
-        "computing embeddings requires the esm package "
-        '(uv add "esm @ git+https://github.com/Biohub/esm.git"); '
-        "pass --emb-cache to score a genome that is already embedded"
-    )
-    try:
-        from esm.models.esmc import ESMC as model_cls
-    except ImportError:
-        try:
-            from esm.models.esmc import EsmcModel as model_cls
-        except ImportError as exc:  # no esm at all, or an unknown API
-            raise ValueError(hint) from exc
-    try:
-        from esm.tokenization import EsmSequenceTokenizer as tokenizer_cls
-    except ImportError:
-        try:
-            from esm.models.esmc import EsmcTokenizer as tokenizer_cls
-        except ImportError as exc:
-            raise ValueError(hint) from exc
-    return model_cls, tokenizer_cls
 
 
 def load_model(device):
-    """Load ESMC via biohub's esm package."""
-    model_cls, tokenizer_cls = _esmc_classes()
-    try:  # current release: local registry name, device instead of dtype
-        model = model_cls.from_pretrained(
-            ESMC_REGISTRY_NAME, device=torch.device(device)
+    """Load ESMC-300M in bf16, matching the embeddings used for training."""
+    try:
+        from transformers import AutoModel, AutoTokenizer
+    except ImportError as exc:  # the CLI reports this without a traceback
+        raise ValueError(
+            "computing embeddings requires transformers "
+            "(uv pip install transformers); pass --emb-cache to score a genome "
+            "that is already embedded"
+        ) from exc
+
+    offline = os.environ.get("HF_HUB_OFFLINE") == "1"
+    model = (
+        AutoModel.from_pretrained(
+            ESMC_MODEL, dtype=torch.bfloat16, local_files_only=offline
         )
-        tokenizer = tokenizer_cls.from_pretrained(ESMC_REGISTRY_NAME)
-    except (TypeError, ValueError):  # older release: HF repo id plus dtype
-        model = model_cls.from_pretrained(ESMC_MODEL, dtype=torch.bfloat16)
-        tokenizer = tokenizer_cls.from_pretrained(ESMC_MODEL)
-    model = model.to(device)
-    model.eval()
+        .to(device)
+        .eval()
+    )
+    tokenizer = AutoTokenizer.from_pretrained(ESMC_MODEL, local_files_only=offline)
     return model, tokenizer
 
 
@@ -69,11 +52,10 @@ def last_hidden(out: object) -> torch.Tensor:
 
 
 def pool_batch(hidden: torch.Tensor, attn_mask: torch.Tensor) -> np.ndarray:
-    """Mean-pool a whole batch over residues (BOS/EOS excluded) in one shot."""
-    B, T, _ = hidden.shape
-    pos = torch.arange(T, device=hidden.device)
+    """Mean-pool a batch over residues, dropping BOS/EOS and padding."""
     base = attn_mask.to(hidden.device).bool()
-    n_valid = base.sum(dim=1, keepdim=True)  # includes BOS+EOS
+    pos = torch.arange(hidden.shape[1], device=hidden.device).unsqueeze(0)
+    n_valid = base.sum(dim=1, keepdim=True)
     w = base & (pos >= 1) & (pos < n_valid - 1)
     w = w | (~w.any(dim=1, keepdim=True) & base)  # degenerate: all valid
     w = w.to(hidden.dtype)
@@ -106,7 +88,7 @@ def embed_sequences(
             [sequences[i] for i in batch], return_tensors="pt", padding=True
         )
         attn = enc["attention_mask"].to(device)
-        with torch.inference_mode(), sdpa_kernel(KERNELS):
+        with torch.inference_mode():
             result = model(input_ids=enc["input_ids"].to(device), attention_mask=attn)
         embeddings[batch] = pool_batch(last_hidden(result), attn)
         del result

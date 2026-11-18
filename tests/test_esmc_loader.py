@@ -3,70 +3,55 @@ import types
 import unittest
 from unittest.mock import Mock, patch
 
+import numpy as np
 import torch
 
-from bgc_gnn.esmc import ESMC_MODEL, ESMC_REGISTRY_NAME, last_hidden, load_model
+from bgc_gnn.esmc import (
+    ESMC_MODEL,
+    embed_sequences,
+    last_hidden,
+    load_model,
+    pool_batch,
+)
 
 
-def esm_modules(model_cls_name):
-    native = types.ModuleType("esm.models.esmc")
-    setattr(native, model_cls_name, Mock())
-    tokenizer_class = Mock()
-    tokenization = types.ModuleType("esm.tokenization")
-    tokenization.EsmSequenceTokenizer = tokenizer_class
-    return native, tokenization, getattr(native, model_cls_name), tokenizer_class
+def transformers_modules():
+    auto_model = Mock()
+    auto_tokenizer = Mock()
+    module = types.ModuleType("transformers")
+    module.AutoModel = auto_model
+    module.AutoTokenizer = auto_tokenizer
+    return module, auto_model, auto_tokenizer
 
 
 class EsmcLoaderTest(unittest.TestCase):
-    def test_current_release_loads_by_registry_name_and_sets_eval(self):
-        native, tokenization, model_cls, tokenizer_cls = esm_modules("ESMC")
-        with patch.dict(
-            sys.modules,
-            {"esm.models.esmc": native, "esm.tokenization": tokenization},
-        ):
-            result, tokenizer = load_model("cpu")
-        model_cls.from_pretrained.assert_called_once_with(
-            ESMC_REGISTRY_NAME, device=torch.device("cpu")
+    def test_model_loads_in_bf16_on_the_requested_device(self):
+        module, auto_model, auto_tokenizer = transformers_modules()
+        with patch.dict(sys.modules, {"transformers": module}):
+            model, tokenizer = load_model("cpu")
+        auto_model.from_pretrained.assert_called_once_with(
+            ESMC_MODEL, dtype=torch.bfloat16, local_files_only=False
         )
-        tokenizer_cls.from_pretrained.assert_called_once_with(ESMC_REGISTRY_NAME)
-        loaded = model_cls.from_pretrained.return_value
-        loaded.to.assert_called_once_with("cpu")
-        model = loaded.to.return_value
-        model.eval.assert_called_once_with()
-        self.assertIs(result, model)
-        self.assertIs(tokenizer, tokenizer_cls.from_pretrained.return_value)
+        auto_model.from_pretrained.return_value.to.assert_called_once_with("cpu")
+        loaded = auto_model.from_pretrained.return_value.to.return_value
+        loaded.eval.assert_called_once_with()
+        auto_tokenizer.from_pretrained.assert_called_once_with(
+            ESMC_MODEL, local_files_only=False
+        )
+        self.assertIs(model, loaded.eval.return_value)
+        self.assertIs(tokenizer, auto_tokenizer.from_pretrained.return_value)
 
-    def test_older_release_falls_back_to_hf_id_and_dtype(self):
-        native, tokenization, model_cls, tokenizer_cls = esm_modules("ESMC")
-        fallback = Mock()
-        model_cls.from_pretrained.side_effect = [TypeError("dtype"), fallback]
-        with patch.dict(
-            sys.modules,
-            {"esm.models.esmc": native, "esm.tokenization": tokenization},
+    def test_offline_environment_keeps_the_loader_off_the_network(self):
+        module, auto_model, auto_tokenizer = transformers_modules()
+        with (
+            patch.dict(sys.modules, {"transformers": module}),
+            patch.dict("os.environ", {"HF_HUB_OFFLINE": "1"}),
         ):
-            result, tokenizer = load_model("cpu")
-        self.assertEqual(
-            model_cls.from_pretrained.call_args_list[1].kwargs,
-            {"dtype": torch.bfloat16},
+            load_model("cpu")
+        self.assertTrue(auto_model.from_pretrained.call_args.kwargs["local_files_only"])
+        self.assertTrue(
+            auto_tokenizer.from_pretrained.call_args.kwargs["local_files_only"]
         )
-        self.assertEqual(
-            model_cls.from_pretrained.call_args_list[1].args, (ESMC_MODEL,)
-        )
-        tokenizer_cls.from_pretrained.assert_called_once_with(ESMC_MODEL)
-        self.assertIs(result, fallback.to.return_value)
-        self.assertIs(tokenizer, tokenizer_cls.from_pretrained.return_value)
-
-    def test_legacy_class_names_are_still_accepted(self):
-        native = types.ModuleType("esm.models.esmc")
-        native.EsmcModel = Mock()
-        native.EsmcTokenizer = Mock()
-        with patch.dict(sys.modules, {"esm.models.esmc": native}):
-            result, tokenizer = load_model("cpu")
-        native.EsmcModel.from_pretrained.assert_called_once_with(
-            ESMC_REGISTRY_NAME, device=torch.device("cpu")
-        )
-        native.EsmcTokenizer.from_pretrained.assert_called_once_with(ESMC_REGISTRY_NAME)
-        self.assertIs(tokenizer, native.EsmcTokenizer.from_pretrained.return_value)
 
     def test_last_hidden_accepts_both_output_shapes(self):
         hidden = torch.zeros(2, 5, 960)
@@ -76,6 +61,38 @@ class EsmcLoaderTest(unittest.TestCase):
         self.assertIs(last_hidden(current), hidden)
         with self.assertRaisesRegex(ValueError, "no hidden states"):
             last_hidden(types.SimpleNamespace())
+
+    def test_pooling_drops_padding_and_the_bos_eos_tokens(self):
+        hidden = torch.zeros(1, 5, 960)
+        hidden[0, 1, :] = 2.0  # BOS at 0, only residue 1, EOS at 2
+        hidden[0, 2, :] = 4.0
+        mask = torch.tensor([[True, True, True, False, False]])
+        pooled = pool_batch(hidden, mask)
+        self.assertEqual(pooled.shape, (1, 960))
+        np.testing.assert_allclose(pooled[0], 2.0)
+
+    def test_embed_sequences_pools_every_sequence_once(self):
+        class Blocking(torch.nn.Module):
+            def forward(self, input_ids, attention_mask):
+                hidden = torch.ones(input_ids.shape[0], input_ids.shape[1], 960)
+                return types.SimpleNamespace(last_hidden_state=hidden)
+
+        tokenizer = Mock()
+        tokenizer.side_effect = lambda batch, **_: {
+            "input_ids": torch.ones(len(batch), 4, dtype=torch.long),
+            "attention_mask": torch.ones(len(batch), 4, dtype=torch.long),
+        }
+        with patch("bgc_gnn.esmc.load_model", return_value=(Blocking(), tokenizer)):
+            matrix = embed_sequences(["MKVA", "MKVAG"], torch.device("cpu"))
+        self.assertEqual(matrix.shape, (2, 960))
+        np.testing.assert_allclose(matrix, 1.0)
+
+    def test_missing_transformers_becomes_a_clear_error(self):
+        with (
+            patch.dict(sys.modules, {"transformers": None}),
+            self.assertRaisesRegex(ValueError, "requires transformers"),
+        ):
+            load_model("cpu")
 
 
 if __name__ == "__main__":

@@ -37,15 +37,16 @@ frozen ESMC-300M 960d gene embeddings
 uv sync --locked
 ```
 
-CLI 入口是 `bgc-detector`。只有需要**现算** embedding 时才额外依赖 ESMC（Biohub 的 `esm`
-包，不在 transformers 里）：
+CLI 入口是 `bgc-detector`。只有需要**现算** embedding 时才额外依赖 `transformers`
+（ESMC-300M 是 transformers 原生架构）：
 
 ```bash
+uv pip install transformers
 export HF_HOME=/path/to/huggingface   # 复用已有 ESMC-300M 权重
-uv add "esm @ git+https://github.com/Biohub/esm.git"
+export HF_HUB_OFFLINE=1              # 可选：只用本地缓存，不联网
 ```
 
-只要给出已算好的 embedding parquet，打分不需要 `esm`。
+只要给出已算好的 embedding parquet，打分不需要 `transformers`。
 
 ## 用法
 
@@ -135,5 +136,6 @@ tests/          unittest（uv run python -m unittest discover -s tests）
 ## 已知限制
 
 - 窗口依赖 128 个相邻基因，短 contig 靠尾部环绕补满；单基因证据不进入模型
-- 现算 embedding 的速度与数值取决于 ESMC 推理环境（是否安装 xformers / flash-attn）
+- 现算 embedding 需要 transformers + 本地 ESMC-300M 权重；用同一份权重重算与训练时的嵌入
+  平均差约 1e-4 量级（最大 3.7e-3），足以复现预测，但不是逐位相同
 - 判定阈值随 seed 变化，跨 seed 不可复用；报告指标时务必写明所用阈值

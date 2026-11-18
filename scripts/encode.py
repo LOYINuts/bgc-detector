@@ -23,14 +23,12 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
-from torch.nn.attention import sdpa_kernel
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from bgc_gnn.dataset import normalize_strand, normalize_translation
 from bgc_gnn.esmc import (
     EMBEDDING_DIM,
     ESMC_MODEL,
-    KERNELS,
     last_hidden,
     load_model,
     pool_batch,
@@ -168,10 +166,7 @@ def run(
         enc = tokenizer(batch_inputs, return_tensors="pt", padding=True)
         input_ids = enc["input_ids"].to(device)
         attn = enc["attention_mask"].to(device)
-        with (
-            torch.inference_mode(),
-            sdpa_kernel(KERNELS),
-        ):
+        with torch.inference_mode():
             out = model_obj(input_ids=input_ids, attention_mask=attn)
         hidden = last_hidden(out)  # [B, T, D]
 
