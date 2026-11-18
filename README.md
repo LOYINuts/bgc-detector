@@ -24,14 +24,13 @@ ESMC-300M 960d per-gene embedding（冻结）
 ## 安装
 
 ```bash
-uv sync --locked          # 需要 Python >= 3.12
+uv sync --locked          # Python 3.12.x（见 .python-version）
 ```
 
-CLI 入口是 `bgc-detector`。要现场算嵌入（即不给 `--emb-cache`）时，还需要 transformers
-和本地 ESMC-300M 权重：
+CLI 入口是 `bgc-detector`。要现场算嵌入（即不给 `--emb-cache`）时，需要本地 ESMC-300M
+权重，把 HF 缓存目录指向它：
 
 ```bash
-uv pip install transformers
 export HF_HOME=/path/to/huggingface
 export HF_HUB_OFFLINE=1   # 可选，只用本地缓存，不联网
 ```

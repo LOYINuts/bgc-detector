@@ -38,8 +38,8 @@ GenBank 解析和窗口打分只有一份实现（`bgc_gnn/predict.py`），`scr
 
 ## 现算嵌入
 
-ESMC-300M 用 transformers 加载（`ESMCModel`），bf16。用训练时那份本地权重重算 NG 里 40 个
-基因，与冻结 parquet 比：
+ESMC-300M 用 transformers 加载（`ESMCModel`），bf16，依赖已写进 `pyproject.toml`。用训练
+时那份本地权重重算 NG 里 40 个基因，与冻结 parquet 比：
 
 | 项 | 值 |
 | --- | --- |

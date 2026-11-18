@@ -3,7 +3,7 @@ name = "bgc-detector"
 version = "1.0.0"
 description = "Per-gene BGC detection from frozen ESMC gene embeddings (final model only)"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "biopython>=1.87",
     "numpy>=2.5.0",
@@ -11,6 +11,7 @@ dependencies = [
     "scikit-learn>=1.9.0",
     "torch>=2.12.1",
     "tqdm>=4.68.3",
+    "transformers>=4.57.6,<5",
 ]
 
 [project.scripts]
