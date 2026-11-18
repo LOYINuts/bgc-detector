@@ -308,7 +308,7 @@ class CommandLineTest(unittest.TestCase):
                         "cpu",
                     ]
                 )
-            self.assertIn("requires transformers", err.getvalue())
+            self.assertIn("needs a transformers build", err.getvalue())
             self.assertNotIn("Traceback", err.getvalue())
 
     def test_predict_refuses_checkpoint_threshold_when_it_is_missing(self):

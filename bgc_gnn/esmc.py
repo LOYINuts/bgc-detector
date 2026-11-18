@@ -23,9 +23,9 @@ def load_model(device):
         from transformers import AutoModel, AutoTokenizer
     except ImportError as exc:  # the CLI reports this without a traceback
         raise ValueError(
-            "computing embeddings requires transformers "
-            "(uv pip install transformers); pass --emb-cache to score a genome "
-            "that is already embedded"
+            "computing embeddings needs a transformers build whose ESMC matches the "
+            f"{ESMC_MODEL} checkpoint (public releases use a different schema); "
+            "pass --emb-cache with precomputed embeddings"
         ) from exc
 
     offline = os.environ.get("HF_HUB_OFFLINE") == "1"
@@ -36,7 +36,21 @@ def load_model(device):
         model = AutoModel.from_pretrained(
             ESMC_MODEL, torch_dtype=torch.bfloat16, **kwargs
         )
-    model = model.to(device).eval()
+    loaded = model.to(device)
+    # Public transformers builds expose a different ESMC schema: the checkpoint's
+    # d_model/n_heads/n_layers are ignored and the model comes out 2560 wide with
+    # random weights. Refuse that instead of returning nonsense embeddings.
+    config = getattr(loaded, "config", None)
+    width = getattr(config, "hidden_size", None) or getattr(
+        config, "d_model", EMBEDDING_DIM
+    )
+    if width != EMBEDDING_DIM:
+        raise ValueError(
+            f"ESMC loaded {width}-wide instead of {EMBEDDING_DIM}; this transformers "
+            f"build does not match the {ESMC_MODEL} checkpoint schema, so the weights "
+            "would be random. Use a matching build, or pass --emb-cache."
+        )
+    model = loaded.eval()
     tokenizer = AutoTokenizer.from_pretrained(ESMC_MODEL, local_files_only=offline)
     return model, tokenizer
 

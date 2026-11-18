@@ -38,8 +38,10 @@ GenBank 解析和窗口打分只有一份实现（`bgc_gnn/predict.py`），`scr
 
 ## 现算嵌入
 
-ESMC-300M 用 transformers 加载（`ESMCModel`），bf16，依赖已写进 `pyproject.toml`。用训练
-时那份本地权重重算 NG 里 40 个基因，与冻结 parquet 比：
+ESMC-300M 用 transformers 加载，bf16。只有与 checkpoint schema 一致的构建才能算出可用
+嵌入；公开版本换来的是一份随机初始化的 2560 宽模型（4.57.6 没有 ESMC，5.23 忽略
+`d_model`/`n_layers`），现在 `load_model` 会直接报错。用训练时那份能匹配的构建重算 NG 里
+40 个基因，与冻结 parquet 比：
 
 | 项 | 值 |
 | --- | --- |

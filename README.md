@@ -27,13 +27,12 @@ ESMC-300M 960d per-gene embedding（冻结）
 uv sync --locked          # Python 3.12.x（见 .python-version）
 ```
 
-CLI 入口是 `bgc-detector`。要现场算嵌入（即不给 `--emb-cache`）时，需要本地 ESMC-300M
-权重，把 HF 缓存目录指向它：
+CLI 入口是 `bgc-detector`。预测的输入是每基因嵌入，需要自己准备 parquet 并用
+`--emb-cache` 传入（格式：`gene_id` + 960 维 `embedding` 两列）。
 
-```bash
-export HF_HOME=/path/to/huggingface
-export HF_HUB_OFFLINE=1   # 可选，只用本地缓存，不联网
-```
+仓库里没有可直接用的 ESMC 推理依赖：训练用的 `biohub/ESMC-300M` 权重需要与它 schema
+一致的 transformers 构建，公开版本（4.x 无 ESMC，5.x 忽略 `d_model` 建出 2560 宽随机模型）
+都不匹配，所以不给 `--emb-cache` 会直接报错而不是算出错误嵌入。
 
 ## 用法
 

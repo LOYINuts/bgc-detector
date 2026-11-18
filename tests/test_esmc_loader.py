@@ -21,6 +21,9 @@ def transformers_modules():
     module = types.ModuleType("transformers")
     module.AutoModel = auto_model
     module.AutoTokenizer = auto_tokenizer
+    config = auto_model.from_pretrained.return_value.to.return_value.config
+    config.hidden_size = None  # older ESMC schema only carries d_model
+    config.d_model = 960
     return module, auto_model, auto_tokenizer
 
 
@@ -90,7 +93,18 @@ class EsmcLoaderTest(unittest.TestCase):
     def test_missing_transformers_becomes_a_clear_error(self):
         with (
             patch.dict(sys.modules, {"transformers": None}),
-            self.assertRaisesRegex(ValueError, "requires transformers"),
+            self.assertRaisesRegex(ValueError, "needs a transformers build"),
+        ):
+            load_model("cpu")
+
+    def test_a_mismatched_esmc_schema_is_refused(self):
+        module, auto_model, _ = transformers_modules()
+        auto_model.from_pretrained.return_value.to.return_value.config.hidden_size = (
+            2560
+        )
+        with (
+            patch.dict(sys.modules, {"transformers": module}),
+            self.assertRaisesRegex(ValueError, "2560-wide instead of 960"),
         ):
             load_model("cpu")
 
