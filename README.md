@@ -74,7 +74,8 @@ uv run bgc-detector predict \
 
 - 输入：带 `CDS` 与 `translation` 的 GenBank（antiSMASH / ClusterFinder 注释均可）
 - 判定阈值**默认 0.5**；要改用 checkpoint 里存的验证 MCC 阈值，加 `--threshold checkpoint`
-- `--emb-cache path.parquet`：存在就复用，不存在就先算 embedding 再写入，同一个基因组重复预测不必重算
+- 不给 `--emb-cache` 时现场用 ESMC-300M 算嵌入，这一步需要 `transformers` 与本地权重
+- `--emb-cache path.parquet`：已存在就复用（不再加载 ESMC），不存在就先算再写入，同一个基因组重复预测不必重算
 - 没有 `translation` 或没有 embedding 的基因不进入结果，会在 stderr 警告
 
 输出：
@@ -126,7 +127,8 @@ bgc_gnn/
   eval.py       指标与验证阈值选择
   checkpoint.py checkpoint 负载、溯源、预训练迁移校验
   predict.py    GenBank 解析与窗口打分（CLI 与评测共用）
-  esmc.py       ESMC-300M 嵌入（延迟导入）
+  esmc.py       ESMC-300M 嵌入（transformers，延迟导入）
+  runtime.py    CPU 线程数与映射文件预读
   verify_inputs.py  批次输入 SHA256 核验与 receipt
   cli.py        bgc-detector 命令行
 scripts/        数据构建、编码、外部对比评测、runner

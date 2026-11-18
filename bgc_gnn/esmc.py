@@ -29,13 +29,14 @@ def load_model(device):
         ) from exc
 
     offline = os.environ.get("HF_HUB_OFFLINE") == "1"
-    model = (
-        AutoModel.from_pretrained(
-            ESMC_MODEL, dtype=torch.bfloat16, local_files_only=offline
+    kwargs = {"local_files_only": offline}
+    try:  # transformers >= 4.56 spells it dtype; older releases use torch_dtype
+        model = AutoModel.from_pretrained(ESMC_MODEL, dtype=torch.bfloat16, **kwargs)
+    except TypeError:
+        model = AutoModel.from_pretrained(
+            ESMC_MODEL, torch_dtype=torch.bfloat16, **kwargs
         )
-        .to(device)
-        .eval()
-    )
+    model = model.to(device).eval()
     tokenizer = AutoTokenizer.from_pretrained(ESMC_MODEL, local_files_only=offline)
     return model, tokenizer
 

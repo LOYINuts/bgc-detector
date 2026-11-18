@@ -343,6 +343,45 @@ class CommandLineTest(unittest.TestCase):
                 )
             self.assertIn("validation-MCC threshold", err.getvalue())
 
+    def test_existing_cache_is_never_rewritten(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            genome = root / "genome.gbk"
+            write_genome(genome, [("ctg", 2)])
+            cache = root / "cache.parquet"
+            write_embeddings(cache, ["ctg:g0"])  # only one of the two genes
+            before = cache.read_bytes()
+            checkpoint = root / "detector.pt"
+            write_checkpoint(checkpoint)
+            with (
+                patch(
+                    "bgc_gnn.cli.embed_sequences",
+                    lambda sequences, device, max_toks: np.full(
+                        (len(sequences), 960), 0.5, dtype=np.float32
+                    ),
+                ),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                main(
+                    [
+                        "predict",
+                        "--genome",
+                        str(genome),
+                        "--checkpoint",
+                        str(checkpoint),
+                        "--outdir",
+                        str(root / "out"),
+                        "--emb-cache",
+                        str(cache),
+                        "--device",
+                        "cpu",
+                    ]
+                )
+            self.assertEqual(cache.read_bytes(), before)
+            provenance = json.loads((root / "out/predict.json").read_text())
+            self.assertEqual(provenance["n_scored"], 2)
+            self.assertEqual(provenance["embeddings_from"], "cache")
+
 
 if __name__ == "__main__":
     unittest.main()

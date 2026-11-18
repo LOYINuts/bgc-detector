@@ -13,7 +13,7 @@ import pyarrow.parquet as pq
 import torch
 
 from bgc_gnn.checkpoint import file_fingerprint, git_commit, validation_threshold
-from bgc_gnn.esmc import EMBEDDING_DIM, MAX_TOKS, embed_sequences
+from bgc_gnn.esmc import EMBEDDING_DIM, ESMC_MODEL, MAX_TOKS, embed_sequences
 from bgc_gnn.predict import STRIDE, gene_order, load_detector, mean_scores, parse_gbk
 
 
@@ -111,11 +111,18 @@ def predict(args: argparse.Namespace) -> None:
             [by_id[gid]["translation"] for gid in missing], device, args.max_toks
         )
         emb_map.update(dict(zip(missing, matrix)))
-        if args.emb_cache:
+        if args.emb_cache and not reused_embeddings:
+            # Never rewrite a cache that already existed: it may be shared input.
             _write_embeddings(
                 args.emb_cache, list(emb_map), np.stack(list(emb_map.values()))
             )
             print(f"  embeddings saved -> {args.emb_cache}", flush=True)
+        elif args.emb_cache:
+            print(
+                f"  {args.emb_cache} kept as is; {len(missing)} new embeddings "
+                "were not written",
+                flush=True,
+            )
     if without_translation:
         warnings.warn(
             f"{len(without_translation)} genes have no translation and were skipped",
@@ -124,7 +131,7 @@ def predict(args: argparse.Namespace) -> None:
 
     order = gene_order(genes, set(emb_map))
     scores, windows = mean_scores(model, emb_map, order, device)
-    excluded = [g for g in genes if g["gene_id"] not in scores]
+    excluded = [g for g in genes if g["translation"] and g["gene_id"] not in scores]
     if excluded:
         warnings.warn(
             f"{len(excluded)} genes were not scored (no embedding)",
@@ -166,7 +173,7 @@ def predict(args: argparse.Namespace) -> None:
         "stride": STRIDE,
         "aggregate": "mean",
         "postprocess": "none",
-        "esmc_model": "biohub/ESMC-300M",
+        "esmc_model": ESMC_MODEL,
         "embedding_dim": EMBEDDING_DIM,
         "embeddings_from": "cache" if reused_embeddings else "computed",
         "n_genes": len(genes),
