@@ -38,23 +38,27 @@ GenBank 解析和窗口打分只有一份实现（`bgc_gnn/predict.py`），`scr
 
 ## 现算嵌入
 
-ESMC-300M 用 transformers 加载，bf16。只有与 checkpoint schema 一致的构建才能算出可用
-嵌入；公开版本换来的是一份随机初始化的 2560 宽模型（4.57.6 没有 ESMC，5.23 忽略
-`d_model`/`n_layers`），现在 `load_model` 会直接报错。用训练时那份能匹配的构建重算 NG 里
-40 个基因，与冻结 parquet 比：
+ESMC-300M 用 `esm` 包的 `EsmcModel` 加载（`my-bgc-v2/scripts/encode.py` 里的原版写法），
+bf16，与训练时那份嵌入同源。注意不要用 transformers 的 ESMC：对这份 checkpoint 它会按自己
+的默认几何建出 2560 宽、80 层模型，权重全部 MISSING（`scripts/check_esmc.py` 会直接判定
+不可用）。
+
+用 `scripts/check_esmc.py` 复核（8 个 NG 基因，`esm` 3.5.0 + 本地权重）：
 
 | 项 | 值 |
 | --- | --- |
-| max abs diff | 0.0037 |
-| mean abs diff | 1.5e-4 |
-| 参考量级（分量绝对值均值） | 0.0155 |
+| max abs diff | 0.0039 |
+| 平均 abs diff | 1.8e-3 |
+| 训练期参考（fp32 路线） | max 0.0037 / mean 1.5e-4 |
 
-差值来自 bf16 注意力归约顺序（没装 xformers/flash-attn 时走 PyTorch SDPA）。预测够用，
-但不能说逐位相同。
+差值都是 bf16 的量化台阶（0.00098 的整数倍），判定为可用。
 
-另外一条弯路记在这里：不要用 Biohub 的 `esm` 包加载这份权重。它的本地注册表指向另一套布局
-（`esmc-300m-2024-12` 的 `data/`），硬套 safetensors 会缺 308 个、多 398 个张量，模型基本
-是随机初始化；用它算出的嵌入与训练用的差到 max |Δ| 4.45。
+差值都是 bf16 的量化台阶（0.00098 的整数倍），预测够用，但不是逐位相同。
+
+走过一次回头路记在这里：一开始用 transformers 的 `AutoModel` 加载同一份权重，它按自己的默认
+几何建出 2560 宽 / 80 层，checkpoint 的键全部 `UNEXPECTED`、模型侧全部 `MISSING`；命令行
+`--threshold` 之外的输出看起来都正常，嵌入却是随机的。`scripts/check_esmc.py` 就是防这个的
+回归检查。
 
 ## 端到端检查
 

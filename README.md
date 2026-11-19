@@ -27,12 +27,11 @@ ESMC-300M 960d per-gene embedding（冻结）
 uv sync --locked          # Python 3.12.x（见 .python-version）
 ```
 
-CLI 入口是 `bgc-detector`。预测的输入是每基因嵌入，需要自己准备 parquet 并用
-`--emb-cache` 传入（格式：`gene_id` + 960 维 `embedding` 两列）。
+CLI 入口是 `bgc-detector`。不给 `--emb-cache` 时，它会用 `esm` 包的 `EsmcModel` 现场算
+嵌入（bf16，权重取自本地 HF 缓存里的 `biohub/ESMC-300M`，没有缓存才联网下载）。
 
-仓库里没有可直接用的 ESMC 推理依赖：训练用的 `biohub/ESMC-300M` 权重需要与它 schema
-一致的 transformers 构建，公开版本（4.x 无 ESMC，5.x 忽略 `d_model` 建出 2560 宽随机模型）
-都不匹配，所以不给 `--emb-cache` 会直接报错而不是算出错误嵌入。
+`--emb-cache path.parquet` 可复用已算好的嵌入（`gene_id` + 960 维 `embedding` 两列），
+同一个基因组反复预测时省时间。
 
 ## 用法
 
@@ -108,6 +107,6 @@ tests/     uv run python -m unittest discover -s tests
 ## 注意
 
 - 模型靠窗口内的相邻基因，128 个一组；短 contig 用尾部环绕补齐
-- 现场算出的嵌入与训练时用的冻结 parquet 平均差约 1e-4（bf16 归约顺序不同），
-  预测可用，但不是逐位相同
+- 现场算出的嵌入与训练时的冻结 parquet 有 bf16 量级的差（max 约 0.004），预测可用，
+  但不是逐位相同；`uv run scripts/check_esmc.py` 可复核
 - 判定阈值随 seed 不同，报告指标时写清用的是哪一个

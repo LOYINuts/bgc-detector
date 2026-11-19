@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "biopython>=1.87",
+    "esm>=3.5.0",
     "numpy>=2.5.0",
     "pyarrow>=24.0.0",
     "scikit-learn>=1.9.0",
