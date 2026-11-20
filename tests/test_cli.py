@@ -5,7 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pyarrow as pa
@@ -18,6 +18,7 @@ from Bio.SeqRecord import SeqRecord
 from bgc_gnn.checkpoint import save_checkpoint
 from bgc_gnn.cli import main
 from bgc_gnn.model import ARCHITECTURE, BGCDetector
+from bgc_gnn.predict import load_detector
 
 
 def write_genome(path: Path, contigs: list[tuple[str, int]]) -> None:
@@ -193,7 +194,7 @@ class CommandLineTest(unittest.TestCase):
                     ]
                 )
             self.assertTrue(cache.is_file())
-            provenance = json.loads((root / "out/predict.json").read_text())
+            provenance = json.loads((root / "out/genome.json").read_text())
             self.assertEqual(provenance["embeddings_from"], "computed")
             self.assertEqual(provenance["n_scored"], 4)
 
@@ -245,7 +246,7 @@ class CommandLineTest(unittest.TestCase):
                         "checkpoint",
                     ]
                 )
-            provenance = json.loads((root / "out/predict.json").read_text())
+            provenance = json.loads((root / "out/genome.json").read_text())
             self.assertEqual(provenance["threshold"], 0.7)
             self.assertEqual(provenance["threshold_source"], "validation")
             self.assertEqual(provenance["threshold_metric"], "mcc")
@@ -378,9 +379,11 @@ class CommandLineTest(unittest.TestCase):
                     ]
                 )
             self.assertEqual(cache.read_bytes(), before)
-            provenance = json.loads((root / "out/predict.json").read_text())
+            provenance = json.loads((root / "out/genome.json").read_text())
             self.assertEqual(provenance["n_scored"], 2)
-            self.assertEqual(provenance["embeddings_from"], "cache")
+            self.assertEqual(provenance["embeddings_from"], "cache+computed")
+            self.assertEqual(provenance["n_embedded_reused"], 1)
+            self.assertEqual(provenance["n_embedded_computed"], 1)
 
     def test_help_documents_both_commands(self):
         for argv in (["--help"], ["predict", "--help"], ["info", "--help"]):
@@ -395,6 +398,110 @@ class CommandLineTest(unittest.TestCase):
         text = out.getvalue()
         self.assertIn("STEM.genes.tsv", text)
         self.assertIn("checkpoint", text)
+
+    def test_a_second_genome_reuses_the_loaded_model(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first, second = root / "a.gbk", root / "b.gbk"
+            write_genome(first, [("ctg", 2)])
+            write_genome(second, [("ctg", 3)])
+            checkpoint = root / "detector.pt"
+            write_checkpoint(checkpoint)
+            loader = Mock(wraps=load_detector)
+            with (
+                patch(
+                    "bgc_gnn.cli.embed_sequences",
+                    lambda sequences, device, max_toks: np.full(
+                        (len(sequences), 960), 0.5, dtype=np.float32
+                    ),
+                ),
+                patch("bgc_gnn.cli.load_detector", loader),
+                patch(
+                    "bgc_gnn.cli.mean_scores",
+                    Mock(
+                        side_effect=lambda model, emb, order, device: (
+                            {gid: 0.7 for gids in order.values() for gid in gids},
+                            1,
+                        )
+                    ),
+                ),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                main(
+                    [
+                        "predict",
+                        "--genome",
+                        str(first),
+                        str(second),
+                        "--checkpoint",
+                        str(checkpoint),
+                        "--outdir",
+                        str(root / "out"),
+                        "--device",
+                        "cpu",
+                    ]
+                )
+            self.assertEqual(loader.call_count, 1)
+            for stem in ("a", "b"):
+                self.assertTrue((root / f"out/{stem}.genes.tsv").is_file())
+                self.assertTrue((root / f"out/{stem}.json").is_file())
+
+    def test_regions_merge_called_genes_and_apply_the_filters(self):
+        tsv = (
+            "\n".join(
+                [
+                    "contig\tgene_id\tlocus_tag\tstart\tend\tstrand\tscore\tpredicted",
+                    "ctg\tctg:g0\tg0\t0\t100\t+\t0.9\t1",
+                    "ctg\tctg:g1\tg1\t100\t200\t+\t0.8\t1",
+                    "ctg\tctg:g2\tg2\t200\t300\t+\t0.1\t0",
+                    "ctg\tctg:g3\tg3\t300\t400\t+\t0.95\t1",
+                    "ctg\tctg:g4\tg4\t400\t500\t+\t0.1\t0",
+                    "ctg\tctg:g5\tg5\t500\t600\t+\t0.1\t0",
+                    "ctg\tctg:g6\tg6\t600\t700\t+\t0.1\t0",
+                    "ctg\tctg:g7\tg7\t700\t800\t+\t0.1\t0",
+                    "ctg\tctg:g8\tg8\t800\t900\t+\t0.97\t1",
+                    "ctg\tctg:g9\tg9\t900\t1000\t+\t0.2\t0",
+                ]
+            )
+            + "\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            genes = Path(tmp) / "run.genes.tsv"
+            genes.write_text(tsv, encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()):
+                main(["regions", "--genes", str(genes)])
+            out = (Path(tmp) / "run.regions.tsv").read_text().splitlines()
+            self.assertEqual(
+                out[0], "contig\tstart\tend\tn_genes\tmean_score\tmax_score"
+            )
+            # g0,g1 and g3 join across one uncalled gene; g8 is far away and alone
+            self.assertEqual(len(out), 2)
+            self.assertEqual(out[1].split("\t")[:4], ["ctg", "0", "400", "3"])
+            self.assertEqual(out[1].split("\t")[5:], [repr(0.95)])
+
+    def test_regions_respect_max_gap_and_min_count(self):
+        tsv = (
+            "\n".join(
+                [
+                    "contig\tgene_id\tlocus_tag\tstart\tend\tstrand\tscore\tpredicted",
+                    "ctg\tctg:g0\tg0\t0\t100\t+\t0.9\t1",
+                    "ctg\tctg:g1\tg1\t100\t200\t+\t0.1\t0",
+                    "ctg\tctg:g2\tg2\t200\t300\t+\t0.1\t0",
+                    "ctg\tctg:g3\tg3\t300\t400\t+\t0.8\t1",
+                ]
+            )
+            + "\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            genes = Path(tmp) / "run.genes.tsv"
+            genes.write_text(tsv, encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()):
+                main(["regions", "--genes", str(genes), "--max-gap", "1"])
+            # gap of two uncalled genes exceeds --max-gap 1 -> no merged region,
+            # and each single gene is below --min-count 2
+            self.assertEqual(
+                len((Path(tmp) / "run.regions.tsv").read_text().splitlines()), 1
+            )
 
 
 if __name__ == "__main__":

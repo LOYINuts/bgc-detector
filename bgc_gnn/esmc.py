@@ -24,11 +24,13 @@ MAX_TOKS = 8192  # tokens per inference batch; sequences are bucketed by length
 
 
 def local_snapshot() -> str | None:
-    """Newest locally cached snapshot of the checkpoint, if any."""
+    """Most recently written local snapshot of the checkpoint, if any."""
     home = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
     pattern = os.path.join(home, "hub", "models--biohub--ESMC-300M", "snapshots", "*")
-    hits = sorted(glob.glob(pattern))
-    return hits[-1] if hits else None
+    hits = glob.glob(pattern)
+    if not hits:
+        return None
+    return max(hits, key=os.path.getmtime)
 
 
 def load_model(device):

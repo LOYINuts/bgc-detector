@@ -19,6 +19,15 @@
 | 0.5（默认） | 0.6053 | 0.5855 |
 | 0.6901（验证 MCC 选点） | 0.6211 | 0.5988 |
 
+## 区域合并
+
+`predict` 只给逐基因分数。`regions` 负责把相邻的 `predicted=1` 并成区域，规则和 BGC-Prophet
+的 `output` / `pipeline` 相同：跨过 `--max-gap` 个未判基因（默认 3），丢掉少于 `--min-count`
+个基因的区域（默认 2）。输出 `<stem>.regions.tsv`，列为 `contig`、`start`、`end`、`n_genes`、
+`mean_score`、`max_score`。
+
+这一步是展示层，不参与评测：NG 指标、阈值选择、与 `eval_ng` 的核对都只用逐基因分数。
+
 ## 与评测一致
 
 GenBank 解析和窗口打分只有一份实现（`bgc_gnn/predict.py`），`scripts/eval_ng.py` 与 CLI

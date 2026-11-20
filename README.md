@@ -48,7 +48,7 @@ uv run bgc-detector predict \
 缺 `locus_tag` 会自动命名，缺 `translation` 的基因跳过并告警；没有 CDS 注释的文件需要先
 做基因预测。
 
-产物两个文件，同名不同后缀（`--name` 决定，默认 `predict`）：
+产物两个文件，共用同一个 stem（`--name` 指定，默认取基因组文件名，不含扩展名）：
 
 | 文件 | 内容 |
 | --- | --- |
@@ -60,8 +60,22 @@ uv run bgc-detector predict \
 常用开关：
 
 - `--threshold`：默认 `0.5`；写 `checkpoint` 用训练时按验证 MCC 选出的阈值；也可给具体数值
-- `--emb-cache out/genome.emb.parquet`：复用嵌入，第二次预测同一基因组不必重算 ESMC
+- `--genome a.gbk b.gbk`：一次跑多个基因组，模型只加载一次，各写各的产物
+- `--emb-cache out/genome.emb.parquet`：复用嵌入，第二次预测同一基因组不必重算 ESMC（单个基因组）
 - `--device cuda:0` 或 `cpu`，默认自动选；`--max-toks` 在显存不足时调小
+
+### 合并成 BGC 区域
+
+逐基因分数之后，把相邻被判为 1 的基因并成区域（跨过至多 `--max-gap` 个未判基因，丢掉少于
+`--min-count` 个基因的区域）：
+
+```bash
+uv run bgc-detector regions --genes output/genome.genes.tsv --max-gap 3 --min-count 2
+```
+
+写出 `output/genome.regions.tsv`：`contig`、`start`、`end`、`n_genes`、`mean_score`、`max_score`。
+这只是展示层，不改逐基因预测，也不参与评测口径。默认 `--max-gap 3 --min-count 2`（与
+BGC-Prophet 的 `output`/`pipeline` 默认值一致）。
 
 ## 模型
 

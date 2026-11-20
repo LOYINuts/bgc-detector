@@ -65,15 +65,19 @@ class EsmcLoaderTest(unittest.TestCase):
         self.assertEqual(esmc.EsmcModel.from_pretrained.call_count, 2)
         self.assertEqual(esmc.EsmcModel.from_pretrained.call_args.args[0], ESMC_MODEL)
 
-    def test_snapshot_lookup_uses_hf_home(self):
+    def test_snapshot_lookup_prefers_the_most_recent_one(self):
         with (
             patch.dict("os.environ", {"HF_HOME": "/hf"}),
             patch(
                 "glob.glob",
                 return_value=["/hf/hub/x/snapshots/a", "/hf/hub/x/snapshots/b"],
             ),
+            patch(
+                "os.path.getmtime",
+                side_effect=lambda path: 2.0 if path.endswith("a") else 1.0,
+            ),
         ):
-            self.assertTrue(local_snapshot().endswith("snapshots/b"))
+            self.assertTrue(local_snapshot().endswith("snapshots/a"))
 
     def test_missing_esm_package_becomes_a_clear_error(self):
         with (

@@ -26,7 +26,7 @@ def parse_gbk(gbk_path: Path) -> list[dict]:
     """Parse a clusterfinder-annotated GenBank into one row per CDS."""
     print("Parsing GenBank ...", flush=True)
     genes: list[dict] = []
-    with gbk_path.open() as stream:
+    with gbk_path.open(encoding="utf-8") as stream:
         for record in tqdm(SeqIO.parse(stream, "genbank"), desc="  contigs"):
             acc = record.annotations.get("accessions", [record.id])[0]
             org = record.annotations.get("organism", "?")

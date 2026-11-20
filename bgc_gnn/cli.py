@@ -1,10 +1,9 @@
-"""Command line entry point: inspect a checkpoint and predict genes from GenBank."""
+"""Command line entry point: inspect a checkpoint, predict genes, merge regions."""
 
 from __future__ import annotations
 
 import argparse
 import json
-import warnings
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +14,9 @@ import torch
 from bgc_gnn.checkpoint import file_fingerprint, git_commit, validation_threshold
 from bgc_gnn.esmc import EMBEDDING_DIM, ESMC_MODEL, MAX_TOKS, embed_sequences
 from bgc_gnn.predict import STRIDE, gene_order, load_detector, mean_scores, parse_gbk
+
+GENES_HEADER = "contig\tgene_id\tlocus_tag\tstart\tend\tstrand\tscore\tpredicted"
+REGIONS_HEADER = "contig\tstart\tend\tn_genes\tmean_score\tmax_score"
 
 
 def _device(name: str | None) -> torch.device:
@@ -51,26 +53,22 @@ def _write_embeddings(path: Path, gene_ids: list[str], matrix: np.ndarray) -> No
     )
 
 
-def _gene_ids_with_translation(genes: list[dict]) -> tuple[list[str], list[str]]:
-    with_seq = [g["gene_id"] for g in genes if g["translation"]]
-    without = [g["gene_id"] for g in genes if not g["translation"]]
-    return with_seq, without
-
-
 def info(args: argparse.Namespace) -> None:
     _, metadata = load_detector(args.checkpoint, torch.device("cpu"))
     threshold, source = validation_threshold(metadata)
+    runtime = metadata.get("runtime", {})
     print(f"checkpoint: {args.checkpoint}")
     print(
         f"  kind: {metadata.get('checkpoint_kind')}  weights: {metadata.get('weight_source')}"
     )
     print(
-        f"  epoch: {metadata.get('epoch')}  selection: {metadata.get('selection_metric')} = {metadata.get('selection_value')}"
+        f"  epoch: {metadata.get('epoch')}  selection: "
+        f"{metadata.get('selection_metric')} = {metadata.get('selection_value')}"
     )
     print(
-        f"  threshold: {threshold:.6f} (source={source}, metric={metadata.get('validation_threshold_metric')})"
+        f"  threshold: {threshold:.6f} (source={source}, "
+        f"metric={metadata.get('validation_threshold_metric')})"
     )
-    runtime = metadata.get("runtime", {})
     print(
         f"  trained on: torch {runtime.get('torch')}, commit {runtime.get('git_commit')}"
     )
@@ -86,23 +84,20 @@ def _threshold(value: str, metadata: dict) -> tuple[float, str]:
     return threshold, "fixed"
 
 
-def predict(args: argparse.Namespace) -> None:
-    device = _device(args.device)
-    model, metadata = load_detector(args.checkpoint, device)
-    threshold, threshold_source = _threshold(args.threshold, metadata)
-
-    genes = parse_gbk(args.genome)
-    if not genes:
-        raise ValueError(f"no CDS features found in {args.genome}")
-
-    emb_map: dict[str, np.ndarray] = {}
-    reused_embeddings = bool(args.emb_cache and args.emb_cache.is_file())
-    if reused_embeddings:
-        print(f"Reusing embeddings: {args.emb_cache}", flush=True)
-        emb_map.update(_read_embeddings(args.emb_cache))
-    gene_ids, without_translation = _gene_ids_with_translation(genes)
+def _embeddings_for(
+    genes: list[dict], args: argparse.Namespace, device: torch.device
+) -> tuple[dict[str, np.ndarray], dict[str, object]]:
+    """Gene embeddings for one genome, reusing ``--emb-cache`` when present."""
+    gene_ids = [g["gene_id"] for g in genes if g["translation"]]
     if not gene_ids:
         raise ValueError("no gene has a translation; cannot embed")
+
+    emb_map: dict[str, np.ndarray] = {}
+    reused = bool(args.emb_cache and args.emb_cache.is_file())
+    if reused:
+        print(f"Reusing embeddings: {args.emb_cache}", flush=True)
+        emb_map.update(_read_embeddings(args.emb_cache))
+
     missing = [gid for gid in gene_ids if gid not in emb_map]
     if missing:
         print(f"Embedding {len(missing):,} proteins with ESMC-300M ...", flush=True)
@@ -111,7 +106,7 @@ def predict(args: argparse.Namespace) -> None:
             [by_id[gid]["translation"] for gid in missing], device, args.max_toks
         )
         emb_map.update(dict(zip(missing, matrix)))
-        if args.emb_cache and not reused_embeddings:
+        if args.emb_cache and not reused:
             # Never rewrite a cache that already existed: it may be shared input.
             _write_embeddings(
                 args.emb_cache, list(emb_map), np.stack(list(emb_map.values()))
@@ -123,42 +118,68 @@ def predict(args: argparse.Namespace) -> None:
                 "were not written",
                 flush=True,
             )
+
+    if not reused:
+        source = "computed"
+    elif missing:
+        source = "cache+computed"
+    else:
+        source = "cache"
+    counts = {
+        "embeddings_from": source,
+        "n_embedded_computed": len(missing),
+        "n_embedded_reused": len(emb_map) - len(missing),
+    }
+    return emb_map, counts
+
+
+def _score_genome(
+    genome: Path,
+    stem: str,
+    args: argparse.Namespace,
+    model: torch.nn.Module,
+    metadata: dict,
+    device: torch.device,
+    threshold: float,
+    threshold_source: str,
+    checkpoint_fingerprint: dict,
+) -> None:
+    genes = parse_gbk(genome)
+    if not genes:
+        raise ValueError(f"no CDS features found in {genome}")
+
+    without_translation = [g["gene_id"] for g in genes if not g["translation"]]
     if without_translation:
-        warnings.warn(
-            f"{len(without_translation)} genes have no translation and were skipped",
-            RuntimeWarning,
+        print(
+            f"  warning: {len(without_translation):,} genes have no translation and "
+            "were skipped",
+            flush=True,
         )
 
+    emb_map, embedding_counts = _embeddings_for(genes, args, device)
     order = gene_order(genes, set(emb_map))
     scores, windows = mean_scores(model, emb_map, order, device)
-    excluded = [g for g in genes if g["translation"] and g["gene_id"] not in scores]
-    if excluded:
-        warnings.warn(
-            f"{len(excluded)} genes were not scored (no embedding)",
-            RuntimeWarning,
-        )
 
-    stem = args.name or "predict"
-    genes_path = args.outdir / f"{stem}.genes.tsv"
-    provenance_path = args.outdir / f"{stem}.json"
-    args.outdir.mkdir(parents=True, exist_ok=True)
     by_id = {g["gene_id"]: g for g in genes}
     rows = [(accession, gid) for accession, ordered in order.items() for gid in ordered]
-    with genes_path.open("w", encoding="utf-8") as stream:
-        stream.write(
-            "contig\tgene_id\tlocus_tag\tstart\tend\tstrand\tscore\tpredicted\n"
-        )
-        for accession, gid in rows:
-            gene = by_id[gid]
-            score = scores[gid]
-            stream.write(
-                f"{accession}\t{gid}\t{gene['locus_tag']}\t{gene['start']}\t{gene['end']}\t"
-                f"{gene['strand']}\t{score!r}\t{int(score >= threshold)}\n"
-            )
+    args.outdir.mkdir(parents=True, exist_ok=True)
+    genes_path = args.outdir / f"{stem}.genes.tsv"
+    provenance_path = args.outdir / f"{stem}.json"
 
+    lines = [GENES_HEADER]
+    for accession, gid in rows:
+        gene = by_id[gid]
+        score = scores[gid]
+        lines.append(
+            f"{accession}\t{gid}\t{gene['locus_tag']}\t{gene['start']}\t{gene['end']}\t"
+            f"{gene['strand']}\t{score!r}\t{int(score >= threshold)}"
+        )
+    genes_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    n_predicted = sum(int(scores[gid] >= threshold) for _, gid in rows)
     provenance = {
-        "genome": file_fingerprint(args.genome),
-        "checkpoint": file_fingerprint(args.checkpoint),
+        "genome": file_fingerprint(genome),
+        "checkpoint": checkpoint_fingerprint,
         "checkpoint_epoch": metadata.get("epoch"),
         "threshold": threshold,
         "threshold_source": threshold_source,
@@ -173,12 +194,13 @@ def predict(args: argparse.Namespace) -> None:
         "postprocess": "none",
         "esmc_model": ESMC_MODEL,
         "embedding_dim": EMBEDDING_DIM,
-        "embeddings_from": "cache" if reused_embeddings else "computed",
+        "max_toks": args.max_toks,
+        **embedding_counts,
         "n_genes": len(genes),
         "n_scored": len(scores),
-        "n_excluded": len(excluded),
+        "n_excluded": len(without_translation),
         "n_windows": windows,
-        "n_predicted": sum(int(scores[gid] >= threshold) for _, gid in rows),
+        "n_predicted": n_predicted,
         "code_commit": git_commit(),
     }
     provenance_path.write_text(
@@ -187,11 +209,110 @@ def predict(args: argparse.Namespace) -> None:
 
     print(f"  {len(rows):,} genes scored in {windows} windows", flush=True)
     print(
-        f"  {provenance['n_predicted']:,} genes called BGC at threshold {threshold:.4f}",
-        flush=True,
+        f"  {n_predicted:,} genes called BGC at threshold {threshold:.4f}", flush=True
     )
     print(f"  -> {genes_path}", flush=True)
     print(f"  -> {provenance_path}", flush=True)
+
+
+def predict(args: argparse.Namespace) -> None:
+    if args.name and len(args.genome) > 1:
+        raise ValueError("--name with several genomes is ambiguous; drop --name")
+    device = _device(args.device)
+    model, metadata = load_detector(args.checkpoint, device)
+    threshold, threshold_source = _threshold(args.threshold, metadata)
+    checkpoint_fingerprint = file_fingerprint(args.checkpoint)
+    for genome in args.genome:
+        stem = args.name or genome.stem
+        print(f"Genome: {genome} -> {stem}.genes.tsv", flush=True)
+        _score_genome(
+            genome,
+            stem,
+            args,
+            model,
+            metadata,
+            device,
+            threshold,
+            threshold_source,
+            checkpoint_fingerprint,
+        )
+
+
+def _merge_regions(rows: list[list[str]], max_gap: int, min_count: int) -> list[dict]:
+    """Group consecutive predicted genes, tolerating ``max_gap`` uncalled genes."""
+    regions: list[dict] = []
+    current: dict | None = None
+    gap = 0
+    for row in rows:
+        contig, start, end, score, predicted = (
+            row[0],
+            int(row[3]),
+            int(row[4]),
+            float(row[6]),
+            int(row[7]),
+        )
+        if predicted:
+            if current is not None and current["contig"] == contig and gap <= max_gap:
+                current["end"] = end
+                current["scores"].append(score)
+            else:
+                if current is not None:
+                    regions.append(current)
+                current = {
+                    "contig": contig,
+                    "start": start,
+                    "end": end,
+                    "scores": [score],
+                }
+            gap = 0
+        elif current is not None:
+            gap += 1
+    if current is not None:
+        regions.append(current)
+    merged = [
+        {
+            "contig": region["contig"],
+            "start": region["start"],
+            "end": region["end"],
+            "scores": region["scores"],
+        }
+        for region in regions
+        if len(region["scores"]) >= min_count
+    ]
+    return merged
+
+
+def _regions_path(genes: Path) -> Path:
+    """run.genes.tsv -> run.regions.tsv; anything else -> <stem>.regions.tsv."""
+    if genes.name.endswith(".genes.tsv"):
+        return genes.with_name(genes.name[: -len(".genes.tsv")] + ".regions.tsv")
+    return genes.with_name(genes.stem + ".regions.tsv")
+
+
+def regions(args: argparse.Namespace) -> None:
+    lines = args.genes.read_text(encoding="utf-8").splitlines()
+    if not lines or lines[0] != GENES_HEADER:
+        raise ValueError(f"{args.genes} is not a {GENES_HEADER.split(chr(9))[0]} file")
+    rows = [line.split("\t") for line in lines[1:] if line]
+    merged = _merge_regions(rows, args.max_gap, args.min_count)
+
+    output = args.output or _regions_path(args.genes)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    out = [REGIONS_HEADER]
+    for region in merged:
+        scores = np.array(region["scores"], dtype=np.float64)
+        out.append(
+            f"{region['contig']}\t{region['start']}\t{region['end']}\t{len(scores)}\t"
+            f"{float(scores.mean())!r}\t{float(scores.max())!r}"
+        )
+    output.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+    print(
+        f"  {len(merged)} regions from {sum(1 for r in rows if r[7] == '1'):,} predicted "
+        f"genes (max_gap {args.max_gap}, min_count {args.min_count})",
+        flush=True,
+    )
+    print(f"  -> {output}", flush=True)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -199,14 +320,15 @@ def main(argv: list[str] | None = None) -> None:
         prog="bgc-detector",
         description=(
             "Per-gene BGC detection. Scores every CDS of a GenBank file with the "
-            "trained BGCDetector and writes per-gene probabilities."
+            "trained BGCDetector, then optionally merges the called genes into regions."
         ),
         epilog=(
             "examples:\n"
             "  bgc-detector info --checkpoint runs/final_seed1506/detector_960d_best.pt\n"
             "  bgc-detector predict --genome genome.gbk \\\n"
             "      --checkpoint runs/final_seed1506/detector_960d_best.pt \\\n"
-            "      --threshold checkpoint --name genome\n"
+            "      --threshold checkpoint\n"
+            "  bgc-detector regions --genes output/genome.genes.tsv --max-gap 3\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -227,11 +349,12 @@ def main(argv: list[str] | None = None) -> None:
 
     predict_parser = commands.add_parser(
         "predict",
-        help="score every gene of a GenBank file",
+        help="score every gene of one or more GenBank files",
         description=(
             "Score every CDS of a GenBank file in fixed 128-gene windows (stride 64) "
             "and write per-gene BGC probabilities. Genes without a /translation "
-            "qualifier are skipped with a warning."
+            "qualifier are skipped with a warning. Several genomes run in one pass and "
+            "share the loaded model."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -239,8 +362,9 @@ def main(argv: list[str] | None = None) -> None:
         "--genome",
         type=Path,
         required=True,
+        nargs="+",
         metavar="GBK",
-        help="GenBank file whose CDS features carry /translation qualifiers",
+        help="one or more GenBank files whose CDS features carry /translation",
     )
     predict_parser.add_argument(
         "--checkpoint",
@@ -260,7 +384,8 @@ def main(argv: list[str] | None = None) -> None:
         "--name",
         default="",
         metavar="STEM",
-        help="write STEM.genes.tsv and STEM.json (default: predict)",
+        help="output stem; writes STEM.genes.tsv and STEM.json "
+        "(default: the genome file name, no extension)",
     )
     predict_parser.add_argument(
         "--device",
@@ -273,7 +398,8 @@ def main(argv: list[str] | None = None) -> None:
         type=Path,
         default=None,
         metavar="PARQUET",
-        help="reuse this gene embedding parquet; written only when it does not exist",
+        help="reuse this gene embedding parquet; written only when it does not exist "
+        "and only for a single genome",
     )
     predict_parser.add_argument(
         "--max-toks",
@@ -292,7 +418,50 @@ def main(argv: list[str] | None = None) -> None:
     )
     predict_parser.set_defaults(handler=predict)
 
+    regions_parser = commands.add_parser(
+        "regions",
+        help="merge called genes into BGC regions",
+        description=(
+            "Group consecutive genes flagged predicted=1 into regions, bridging gaps "
+            "of up to --max-gap uncalled genes and dropping regions with fewer than "
+            "--min-count genes. This is a reporting step; it does not change the "
+            "per-gene predictions or the evaluated protocol."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    regions_parser.add_argument(
+        "--genes",
+        type=Path,
+        required=True,
+        metavar="TSV",
+        help="the .genes.tsv written by predict",
+    )
+    regions_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        metavar="TSV",
+        help="region table to write (default: replace .genes.tsv with .regions.tsv)",
+    )
+    regions_parser.add_argument(
+        "--max-gap",
+        type=int,
+        default=3,
+        metavar="N",
+        help="bridge up to N uncalled genes inside a region (default: 3)",
+    )
+    regions_parser.add_argument(
+        "--min-count",
+        type=int,
+        default=2,
+        metavar="N",
+        help="drop regions with fewer called genes (default: 2)",
+    )
+    regions_parser.set_defaults(handler=regions)
+
     args = parser.parse_args(argv)
+    if args.command == "predict" and args.emb_cache and len(args.genome) > 1:
+        parser.error("--emb-cache supports a single genome; run genomes separately")
     try:
         args.handler(args)
     except (ValueError, OSError, KeyError, TypeError) as exc:
