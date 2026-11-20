@@ -122,7 +122,8 @@ bash scripts/train/run_final.sh
 
 ## 结果
 
-NG 测试集 67,148 个基因（3,772 正样本），5 个 seed，阈值取各自验证 MCC 选点：
+NG 测试集 67,148 个基因（3,772 正样本），5 个 seed。阈值按各自验证集选点，seed 之间不同
+（本例 0.69–0.79）。
 
 | 指标 | 均值 ± 标准差 |
 | --- | --- |
@@ -148,11 +149,3 @@ tests/              uv run python -m unittest discover -s tests
 ```
 
 脚本按模块运行，例如 `uv run python -m scripts.eval.eval_ng --help`。
-
-## 注意
-
-- 模型靠窗口内的相邻基因；短 contig 尾部环绕补齐，单基因证据不进入模型
-- 现算嵌入是 bf16：在与产出 parquet 相同的机器/GPU 上逐位相同（8 个 NG 基因 max|Δ| = 0），
-  换 GPU 可能有 4e-3 量级差异；`uv run python -m scripts.tools.check_esmc` 可复核
-- 判定阈值随 seed 变化（本例 0.69–0.79）；报告指标时写清用的是哪一个。同一 checkpoint 在
-  NG 上默认 0.5 得 MCC 0.5855，验证阈值得 0.5988

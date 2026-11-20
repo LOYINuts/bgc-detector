@@ -129,8 +129,8 @@ paths; input SHA256 is verified once per batch before launch.
 
 ## Results
 
-NG test set, 67,148 genes (3,772 positives), 5 seeds, each with its own validation-MCC
-threshold:
+NG test set, 67,148 genes (3,772 positives), 5 seeds. Each seed uses the threshold
+picked on its validation split, so thresholds differ between seeds (0.69-0.79 here).
 
 | Metric | Mean ± SD |
 | --- | --- |
@@ -156,14 +156,3 @@ tests/              uv run python -m unittest discover -s tests
 ```
 
 Scripts run as modules, e.g. `uv run python -m scripts.eval.eval_ng --help`.
-
-## Notes
-
-- The model needs neighbouring genes inside a window: short contigs wrap around at the
-  tail, and single-gene evidence never enters it
-- Embeddings are bf16: recomputation is bit-identical to the frozen parquet on the machine
-  that produced it (max|Δ| = 0 over 8 NG genes) and may differ by ~4e-3 on other GPUs;
-  `uv run python -m scripts.tools.check_esmc` re-checks this
-- The decision threshold varies per seed (0.69–0.79 here); state which one a reported
-  number used. On NG the same checkpoint scores MCC 0.5855 at 0.5 and 0.5988 at its
-  validation threshold
