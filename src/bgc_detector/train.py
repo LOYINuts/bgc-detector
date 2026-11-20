@@ -1,14 +1,10 @@
-"""Train the BGC detector: frozen ESMC embeddings -> Channel-Gated Conv-BiGRU.
+"""Train the BGC detector on frozen ESMC embeddings.
 
-Fixed recipe (weights, EMA, schedule and selection all fixed):
-  weighted BCE (pos_weight 2), batch 64, AdamW lr 5e-4 wd 0.01,
-  dropout 0.5 / head 0.1, EMA 0.999 evaluated and exported,
-  ExponentialLR gamma 0.95 starting at epoch 5 (no warmup),
-  checkpoint selection by validation loss, patience 20,
-  validation-MCC threshold saved with the checkpoint.
+Fixed recipe: weighted BCE (pos_weight 2), batch 64, AdamW 5e-4 wd 0.01, dropout
+0.5/head 0.1, EMA 0.999 (validated and exported), ExponentialLR 0.95 from epoch 5,
+selection by validation loss, patience 20, validation-MCC threshold exported.
 
-Pretrained detector transfer is required. The semantic skip is trained during both
-stages; transferred encoder weights always use learning-rate multiplier 0.2.
+Transfer of the pretrained detector is mandatory; encoder weights use lr x0.2.
 
 Usage
 -----

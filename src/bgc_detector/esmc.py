@@ -1,17 +1,12 @@
 """Frozen ESMC-300M (960d) per-protein mean-pooled embeddings.
 
-Loading follows my-bgc-v2/scripts/encode.py, the recipe that produced the frozen
-embeddings: the ``esm`` package's ``EsmcModel`` reads the ``biohub/ESMC-300M``
-checkpoint directly, in bf16. transformers' own ESMC build does not match this
-checkpoint's layout (it produces a 2560-wide model with no shared keys), which is
-why the package is used here.
+Uses the ``esm`` package's ``EsmcModel`` in bf16 -- the code that produced the frozen
+embeddings. transformers' own ESMC builds a 2560-wide model for this checkpoint, so
+``embed_with`` refuses any output that is not 960 wide.
 
-The weights are looked up as: an explicit ``source`` (CLI ``--esmc-path`` or
-``BGC_DETECTOR_ESMC``), else the newest local HF snapshot of ``biohub/ESMC-300M``,
-else the Hub itself.
-
-Check any change against the frozen NG embeddings with
-``uv run python -m scripts.tools.check_esmc``: it must stay at bf16 scale or better.
+Weights come from ``--esmc-path``/``BGC_DETECTOR_ESMC`` when given, else the newest
+local snapshot, else the Hub. Verify changes with
+``uv run python -m scripts.tools.check_esmc``.
 """
 
 from __future__ import annotations

@@ -40,7 +40,6 @@ from bgc_detector.predict import STRIDE, load_detector, mean_scores
 from bgc_detector.predict import gene_order as contig_order
 from bgc_detector.predict import parse_gbk as parse_ng_gbk
 
-# ── paths ───────────────────────────────────────────────────────────────────
 GBK_PATH = Path("data/raw/ng/ClusterFinder_Annotated_Contigs.full.gbk")
 CSV_PATH = Path("data/raw/ng/291BGC.csv")
 OUT_DIR = Path("data/derived/ng_embeddings")
@@ -49,9 +48,6 @@ EMBEDDING_DIM = 960
 
 def _embedding_path() -> Path:
     return OUT_DIR / f"ng_gene_embeddings_{EMBEDDING_DIM}d.parquet"
-
-
-# ── helpers ──────────────────────────────────────────────────────────────────
 
 
 def load_labels(csv_path: Path, genes: list[dict]) -> dict[str, bool]:
@@ -78,9 +74,6 @@ def load_labels(csv_path: Path, genes: list[dict]) -> dict[str, bool]:
         f"  → {n_bgc:,} BGC genes / {len(genes):,} total ({n_bgc / len(genes) * 100:.1f}%)"
     )
     return labels
-
-
-# ── evaluation ───────────────────────────────────────────────────────────────
 
 
 def evaluate_model(

@@ -15,9 +15,6 @@ import time
 from pathlib import Path
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(description="Run antiSMASH on all GTDB genomes")
     parser.add_argument(

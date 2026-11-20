@@ -161,7 +161,7 @@ def audit_sequences(
         hashes["ng"] = set()
         genes_by_hash["ng"] = Counter()
         empty = 0
-        # ponytail: exact sequence hashes only. Use homology clustering for identity-based splits.
+        # shortcut: exact sequence hashes only; homology clustering would be needed for identity splits.
         with ng_gbk.open(encoding="utf-8") as stream:
             for record in SeqIO.parse(stream, "genbank"):
                 for feature in record.features:

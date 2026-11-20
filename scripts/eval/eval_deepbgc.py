@@ -1,19 +1,11 @@
-"""Score DeepBGC's per-gene predictions on the NG test set with the eval_ng metrics.
+"""Score DeepBGC per-gene predictions on the NG test set with the eval_ng metrics.
 
-DeepBGC scores each protein once (mean of its Pfam-domain scores), so it has no
-window/stride protocol. To stay comparable with the project ledger we report:
+DeepBGC scores each protein once, so there is no window protocol. Blocks:
+`unique_genes` (unscored genes imputed 0.0, as its decoder does) and
+`pfam_subset` (only genes it scored).
 
-  unique_genes        per-gene scores; unit of the overlap (stride64/mean) entry
-  pfam_subset         only genes DeepBGC scored; it skips proteins without Pfam
-                      domains, so unscored genes cannot enter this block
-
-In the full unique-gene block an unscored gene is imputed 0.0, which is what DeepBGC
-effectively does when it decodes regions from scores.
-
-Usage (on the server, project venv):
-    uv run python scripts/eval/eval_deepbgc.py \
-        --deepbgc-glob '~/bgc_deepbgc/out/*/*.full.gbk' \
-        --out ~/bgc_deepbgc/out/deepbgc_ng_metrics.json
+    uv run python -m scripts.eval.eval_deepbgc \
+        --deepbgc-glob '~/bgc_deepbgc/out/*/*.full.gbk' --out metrics.json
 """
 
 from __future__ import annotations

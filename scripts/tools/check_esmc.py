@@ -114,8 +114,10 @@ def main() -> int:
     print(
         f"summary: genes={len(values)} max|d|={values.max():.6g} mean|d|={values.mean():.6g}"
     )
-    print("expected: exact match on the machine that produced the parquet; "
-          "other GPUs may differ at bf16 scale (about 4e-3)")
+    print(
+        "expected: exact match on the machine that produced the parquet; "
+        "other GPUs may differ at bf16 scale (about 4e-3)"
+    )
     usable = values.max() <= TOLERANCE
     print("VERDICT:", "usable" if usable else "not usable")
     return 0 if usable else 1

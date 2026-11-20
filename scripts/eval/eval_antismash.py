@@ -1,34 +1,20 @@
-"""Score antiSMASH's per-gene calls on the NG test set with the eval_ng metrics.
+"""Score antiSMASH calls on the NG test set with the eval_ng metrics.
 
-antiSMASH is a rule-based cluster caller, not a ranking model: it emits binary
-region/protocluster calls. A single binary score would make AUROC degenerate, so
-this script ranks the tiers antiSMASH itself annotates, plus the plain binary
-membership variants:
+antiSMASH is a rule-based caller, so its output is scored by tiers; the 0.5 cut is
+"inside a region", the tool's own binary decision:
 
-    score  tier                                    source in antiSMASH output
-    0.90   core biosynthetic                       CDS /gene_kind="biosynthetic"
-    0.80   biosynthetic, did not define the core    CDS /gene_kind="biosynthetic-additional"
-    0.70   other / transport / regulatory          CDS /gene_kind="other|transport|regulatory"
-    0.60   inside a region, outside its protoclusters   inside a /region span only
-    0.00   outside every region
+    0.90  core biosynthetic           CDS /gene_kind="biosynthetic"
+    0.80  biosynthetic, not the core  CDS /gene_kind="biosynthetic-additional"
+    0.70  other/transport/regulatory  CDS /gene_kind="other|transport|regulatory"
+    0.60  in a region, outside protoclusters
+    0.00  outside every region
 
-Every tier above 0.5 is a gene antiSMASH puts inside a region, so the 0.5 cut is
-the tool's own binary decision ("in a region"); the finer tiers only order genes
-inside its calls. A gene the tool calls can therefore never be scored as "not BGC".
+AUROC/AUPRC on that scale rank tiers, not genes; `binary_variants` holds the
+deployment numbers. Blocks (`unique_genes`, `in_region_subset`) match
+`scripts.eval.eval_deepbgc` so the ledger stays comparable.
 
-AUROC/AUPRC are computed on that 5-level score, so they rank tiers, not genes:
-within a tier all genes tie. The `binary_variants` block gives the honest
-deployment numbers, because that is what antiSMASH actually decides.
-
-Blocks mirror scripts/eval/eval_deepbgc.py so numbers stay comparable:
-
-  unique_genes         one score per gene (unit of the overlap stride64/mean entry)
-  in_region_subset     only genes inside an antiSMASH region (coverage block)
-
-Usage (on the server, project venv):
     uv run python -m scripts.eval.eval_antismash \
-        --antismash-glob '~/bgc_antismash/out/ng_full/*.gbk' \
-        --out ~/bgc_antismash/out/antismash_ng_metrics.json
+        --antismash-glob '~/bgc_antismash/out/ng_full/*.gbk' --out metrics.json
 """
 
 from __future__ import annotations

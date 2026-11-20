@@ -1,14 +1,8 @@
-"""Encode genes through frozen ESMC-300M (960d) per-protein mean pooling.
+"""Encode genes through frozen ESMC-300M (960d), per-protein mean pooling.
 
-Sources
--------
-  catalog : read gene_catalog.parquet, write <catalog>/gene_embeddings_960d.parquet
-  ng      : parse the 9-genome ClusterFinder GBK, write
-            data/derived/ng_embeddings/ng_gene_embeddings_960d.parquet
+``--source catalog`` writes ``<catalog>/gene_embeddings_960d.parquet``;
+``--source ng`` writes the nine-genome parquet.
 
-Usage
------
-    uv run python -m scripts.encode.encode --source catalog --catalog-dir data/derived/catalog
     uv run python -m scripts.encode.encode --source ng
 """
 
