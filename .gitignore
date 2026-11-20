@@ -20,3 +20,6 @@ __pycache__/
 .pytest_cache/
 # local agent notes, never commit
 AGENTS.md
+outputs/
+.ruff_cache/
+*.egg-info/

@@ -124,7 +124,7 @@ NG 测试集 67,148 个基因（3,772 正样本），5 个 seed，阈值取各�
 ```text
 bgc_detector/   model.py dataset.py train.py pretrain.py eval.py checkpoint.py
            predict.py esmc.py runtime.py verify_inputs.py cli.py
-scripts/   数据构建、编码、外部评测、run_final.sh、check_esmc.py
+scripts/   数据构建、编码、外部评测、run_final.sh、run_repro_v7_esm.sh、check_esmc.py
 tests/     uv run python -m unittest discover -s tests
 ```
 
