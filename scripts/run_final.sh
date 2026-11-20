@@ -42,7 +42,7 @@ if [ -z "$PRETRAIN_REUSE" ]; then
         [ -f "$f" ] || { echo "missing: $f"; exit 1; }
     done
     mkdir -p "$OUTPUT_ROOT"
-    uv run python -u -m bgc_gnn.verify_inputs \
+    uv run python -u -m bgc_detector.verify_inputs \
         --data-dir "$PT_DATA" --cache-dir "$PT_CACHE" \
         --output "$OUTPUT_ROOT/pretraining_input_verification.json"
 fi
@@ -70,7 +70,7 @@ run_one() {
             return 1
         else
             # Logs stay outside the fresh output directory created by pretrain.py.
-            uv run python -u -m bgc_gnn.pretrain \
+            uv run python -u -m bgc_detector.pretrain \
                 --data-dir "$PT_DATA" --cache-dir "$PT_CACHE" \
                 --input-verification "$OUTPUT_ROOT/pretraining_input_verification.json" \
                 --output-dir "$pt_dir" --seed "$seed" --device "cuda:${gpu}" \
@@ -80,7 +80,7 @@ run_one() {
         pretrained="$pt_dir/pretrained_best.pt"
     fi
     [ -f "$pretrained" ] || { echo "missing: $pretrained"; return 1; }
-    uv run python -u -m bgc_gnn.train \
+    uv run python -u -m bgc_detector.train \
         --fixed-dataset "$TRAIN_DS" --fixed-val-dataset "$VAL_DS" \
         --emb-path "$EMB_PATH" --checkpoint-dir "$run_dir" --seed "$seed" \
         --device "cuda:${gpu}" --pretrained-checkpoint "$pretrained" \

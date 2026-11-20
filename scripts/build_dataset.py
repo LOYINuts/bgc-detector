@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from bgc_gnn.dataset import BGCDetectDataset, EmbeddingStore, load_index
+from bgc_detector.dataset import BGCDetectDataset, EmbeddingStore, load_index
 
 WINDOW_SIZE = 128
 AUGMENT = 5

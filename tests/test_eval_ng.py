@@ -10,8 +10,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 
-from bgc_gnn.checkpoint import save_checkpoint
-from bgc_gnn.model import ARCHITECTURE, BGCDetector
+from bgc_detector.checkpoint import save_checkpoint
+from bgc_detector.model import ARCHITECTURE, BGCDetector
 from scripts import eval_ng
 
 

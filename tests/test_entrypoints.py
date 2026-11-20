@@ -26,7 +26,7 @@ class EntrypointTest(unittest.TestCase):
 
     def test_pretraining_cli_has_no_recipe_switches(self):
         p = subprocess.run(
-            [sys.executable, "-m", "bgc_gnn.pretrain", "--help"],
+            [sys.executable, "-m", "bgc_detector.pretrain", "--help"],
             cwd=ROOT,
             capture_output=True,
             text=True,
@@ -112,11 +112,11 @@ import json,os,sys
 args=sys.argv[1:]
 assert all(os.environ[k]=='2' for k in ['OMP_NUM_THREADS','MKL_NUM_THREADS','OPENBLAS_NUM_THREADS'])
 def arg(name):return args[args.index(name)+1]
-if 'bgc_gnn.verify_inputs' in args:
+if 'bgc_detector.verify_inputs' in args:
     stage='verify'; output=Path(arg('--output'))
     assert not output.exists()
     output.write_text('{}')
-elif 'bgc_gnn.pretrain' in args:
+elif 'bgc_detector.pretrain' in args:
     assert Path(arg('--input-verification')).is_file()
     stage='pretrain'; output=Path(arg('--output-dir'))
     assert Path(arg('--data-dir')).parent.parent.parent == Path(os.environ['DATA_ROOT'])
@@ -125,7 +125,7 @@ elif 'bgc_gnn.pretrain' in args:
     output.mkdir(parents=True)
     (output/'pretrained_best.pt').touch()
     (output/'status.json').write_text(json.dumps({'status':'completed'}))
-elif 'bgc_gnn.train' in args:
+elif 'bgc_detector.train' in args:
     stage='train'; output=Path(arg('--checkpoint-dir'))
     assert Path(arg('--fixed-dataset')).name == os.environ['EXPECTED_TRAIN']
     assert Path(arg('--fixed-val-dataset')).is_file()

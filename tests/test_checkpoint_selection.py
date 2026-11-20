@@ -4,8 +4,8 @@ from pathlib import Path
 
 import torch
 
-from bgc_gnn.checkpoint import load_checkpoint, save_checkpoint
-from bgc_gnn.model import BGCDetector
+from bgc_detector.checkpoint import load_checkpoint, save_checkpoint
+from bgc_detector.model import BGCDetector
 
 
 class CheckpointRoundTripTest(unittest.TestCase):

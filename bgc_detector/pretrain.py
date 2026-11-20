@@ -7,7 +7,7 @@ with ``train.py --pretrained-checkpoint``.
 
 Usage
 -----
-    uv run python -m bgc_gnn.pretrain \
+    uv run python -m bgc_detector.pretrain \
         --data-dir data/derived/pretraining/antismash_v2_v1 \
         --cache-dir data/derived/pretraining/antismash_v2_v1_restart_v2_cache \
         --output-dir runs/pretrain_seed1301 --seed 1301
@@ -28,8 +28,8 @@ from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset
 
-from bgc_gnn.checkpoint import runtime_metadata, save_checkpoint
-from bgc_gnn.model import (
+from bgc_detector.checkpoint import runtime_metadata, save_checkpoint
+from bgc_detector.model import (
     ARCHITECTURE,
     DROPOUT,
     EMBEDDING_DIM,
@@ -37,8 +37,8 @@ from bgc_gnn.model import (
     WINDOW_SIZE,
     BGCDetector,
 )
-from bgc_gnn.runtime import configure_cpu_threads, prefetch_file
-from bgc_gnn.verify_inputs import verify_inputs
+from bgc_detector.runtime import configure_cpu_threads, prefetch_file
+from bgc_detector.verify_inputs import verify_inputs
 
 EPOCHS = 30
 PATIENCE = 5

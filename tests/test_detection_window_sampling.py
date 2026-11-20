@@ -8,7 +8,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 
-from bgc_gnn.dataset import BGCDetectDataset, FixedBGCDataset
+from bgc_detector.dataset import BGCDetectDataset, FixedBGCDataset
 
 
 class _Embeddings:
@@ -42,9 +42,10 @@ class DetectionWindowSamplingTest(unittest.TestCase):
         dataset = self.dataset([short, long], [f"gtdb:pool:{i}" for i in range(200)])
         with (
             patch(
-                "bgc_gnn.dataset.random.choice", side_effect=lambda values: values[0]
+                "bgc_detector.dataset.random.choice",
+                side_effect=lambda values: values[0],
             ),
-            patch("bgc_gnn.dataset.random.randint", return_value=0),
+            patch("bgc_detector.dataset.random.randint", return_value=0),
         ):
             sample = dataset._make_positive(0)
 
@@ -59,9 +60,10 @@ class DetectionWindowSamplingTest(unittest.TestCase):
         dataset = self.dataset([short, long], [f"gtdb:pool:{i}" for i in range(200)])
         with (
             patch(
-                "bgc_gnn.dataset.random.choice", side_effect=lambda values: values[0]
+                "bgc_detector.dataset.random.choice",
+                side_effect=lambda values: values[0],
             ),
-            patch("bgc_gnn.dataset.random.randint", return_value=0),
+            patch("bgc_detector.dataset.random.randint", return_value=0),
         ):
             sample = dataset._make_negative(0)
 
@@ -87,7 +89,7 @@ class DetectionWindowSamplingTest(unittest.TestCase):
             window_size=128,
             augment=1,
         )
-        with patch("bgc_gnn.dataset.random.randint", return_value=40):
+        with patch("bgc_detector.dataset.random.randint", return_value=40):
             sample = dataset._make_positive(0)
 
         self.assertEqual(sample["gene_ids"], source_ids[40:168])
@@ -109,7 +111,7 @@ class DetectionWindowSamplingTest(unittest.TestCase):
         pool = [f"gtdb:pool:{i}" for i in range(100)]
         dataset = self.dataset([first, second], pool)
         with patch(
-            "bgc_gnn.dataset.random.choice", side_effect=lambda values: values[-1]
+            "bgc_detector.dataset.random.choice", side_effect=lambda values: values[-1]
         ):
             sample = dataset._make_negative(0)
 
@@ -125,9 +127,10 @@ class DetectionWindowSamplingTest(unittest.TestCase):
         dataset = self.dataset([short], [f"gtdb:pool:{i}" for i in range(200)])
         with (
             patch(
-                "bgc_gnn.dataset.random.choice", side_effect=lambda values: values[0]
+                "bgc_detector.dataset.random.choice",
+                side_effect=lambda values: values[0],
             ),
-            patch("bgc_gnn.dataset.random.randint", return_value=0),
+            patch("bgc_detector.dataset.random.randint", return_value=0),
         ):
             sample = dataset._make_positive(0)
 

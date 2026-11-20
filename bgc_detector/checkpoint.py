@@ -12,7 +12,7 @@ from typing import Any
 
 import torch
 
-from bgc_gnn.model import ARCHITECTURE
+from bgc_detector.model import ARCHITECTURE
 
 FORMAT_VERSION = 1
 

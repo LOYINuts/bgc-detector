@@ -17,7 +17,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from Bio import SeqIO
 
-from bgc_gnn.checkpoint import file_fingerprint, runtime_metadata
+from bgc_detector.checkpoint import file_fingerprint, runtime_metadata
 
 
 def protein_sequence(value):

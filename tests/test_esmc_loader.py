@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 import torch
 
-from bgc_gnn.esmc import (
+from bgc_detector.esmc import (
     ESMC_MODEL,
     embed_sequences,
     last_hidden,
@@ -30,7 +30,7 @@ class EsmcLoaderTest(unittest.TestCase):
         modules, esmc = esm_modules()
         with (
             patch.dict(sys.modules, modules),
-            patch("bgc_gnn.esmc.local_snapshot", return_value="/snap/abc"),
+            patch("bgc_detector.esmc.local_snapshot", return_value="/snap/abc"),
         ):
             model, tokenizer = load_model("cpu")
         esmc.EsmcModel.from_pretrained.assert_called_once_with(
@@ -47,7 +47,7 @@ class EsmcLoaderTest(unittest.TestCase):
         modules, esmc = esm_modules()
         with (
             patch.dict(sys.modules, modules),
-            patch("bgc_gnn.esmc.local_snapshot", return_value=None),
+            patch("bgc_detector.esmc.local_snapshot", return_value=None),
         ):
             load_model("cpu")
         esmc.EsmcModel.from_pretrained.assert_called_once_with(
@@ -59,7 +59,7 @@ class EsmcLoaderTest(unittest.TestCase):
         esmc.EsmcModel.from_pretrained.side_effect = [OSError("broken"), Mock()]
         with (
             patch.dict(sys.modules, modules),
-            patch("bgc_gnn.esmc.local_snapshot", return_value="/snap/old"),
+            patch("bgc_detector.esmc.local_snapshot", return_value="/snap/old"),
         ):
             load_model("cpu")
         self.assertEqual(esmc.EsmcModel.from_pretrained.call_count, 2)
@@ -117,7 +117,9 @@ class EsmcLoaderTest(unittest.TestCase):
             "input_ids": torch.ones(len(batch), 4, dtype=torch.long),
             "attention_mask": torch.ones(len(batch), 4, dtype=torch.long),
         }
-        with patch("bgc_gnn.esmc.load_model", return_value=(Blocking(), tokenizer)):
+        with patch(
+            "bgc_detector.esmc.load_model", return_value=(Blocking(), tokenizer)
+        ):
             matrix = embed_sequences(["MKVA", "MKVAG"], torch.device("cpu"))
         self.assertEqual(matrix.shape, (2, 960))
         np.testing.assert_allclose(matrix, 1.0)
@@ -134,7 +136,7 @@ class EsmcLoaderTest(unittest.TestCase):
             "attention_mask": torch.ones(len(batch), 4, dtype=torch.long),
         }
         with (
-            patch("bgc_gnn.esmc.load_model", return_value=(Wide(), tokenizer)),
+            patch("bgc_detector.esmc.load_model", return_value=(Wide(), tokenizer)),
             self.assertRaisesRegex(ValueError, "2560d embeddings, expected 960"),
         ):
             embed_sequences(["MKVA"], torch.device("cpu"))

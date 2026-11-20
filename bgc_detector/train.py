@@ -12,7 +12,7 @@ stages; transferred encoder weights always use learning-rate multiplier 0.2.
 
 Usage
 -----
-    uv run python -m bgc_gnn.train \
+    uv run python -m bgc_detector.train \
         --fixed-dataset data/derived/train_test/dataset_train.parquet \
         --fixed-val-dataset data/derived/train_test/dataset_val.parquet \
         --emb-path data/derived/catalog/gene_embeddings_960d.parquet \
@@ -35,23 +35,23 @@ from torch.optim.lr_scheduler import ExponentialLR
 from torch.optim.swa_utils import AveragedModel, get_ema_multi_avg_fn
 from torch.utils.data import DataLoader
 
-from bgc_gnn.checkpoint import (
+from bgc_detector.checkpoint import (
     file_fingerprint,
     initialize_from_pretraining,
     runtime_metadata,
     save_checkpoint,
     write_metadata,
 )
-from bgc_gnn.dataset import EmbeddingStore, FixedBGCDataset, collate_detect_batch
-from bgc_gnn.eval import compute_detect_metrics, select_detection_threshold
-from bgc_gnn.model import (
+from bgc_detector.dataset import EmbeddingStore, FixedBGCDataset, collate_detect_batch
+from bgc_detector.eval import compute_detect_metrics, select_detection_threshold
+from bgc_detector.model import (
     ARCHITECTURE,
     DROPOUT,
     EMBEDDING_DIM,
     HEAD_DROPOUT,
     BGCDetector,
 )
-from bgc_gnn.runtime import configure_cpu_threads
+from bgc_detector.runtime import configure_cpu_threads
 
 BATCH_SIZE = 64
 LR = 5e-4

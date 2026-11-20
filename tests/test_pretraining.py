@@ -17,8 +17,8 @@ from Bio.Seq import Seq
 from Bio.SeqFeature import CompoundLocation, FeatureLocation, SeqFeature
 from Bio.SeqRecord import SeqRecord
 
-from bgc_gnn.checkpoint import file_fingerprint, load_checkpoint
-from bgc_gnn.pretrain import PretrainingDataset, pretraining_loss
+from bgc_detector.checkpoint import file_fingerprint, load_checkpoint
+from bgc_detector.pretrain import PretrainingDataset, pretraining_loss
 from scripts.build_pretraining_data import (
     build,
     contiguous_windows,
@@ -491,9 +491,9 @@ class PretrainingTest(unittest.TestCase):
                 encode_main()
 
     def test_pretraining_cli_completes_and_transfers(self):
-        from bgc_gnn import pretrain
-        from bgc_gnn.checkpoint import initialize_from_pretraining
-        from bgc_gnn.model import BGCDetector
+        from bgc_detector import pretrain
+        from bgc_detector.checkpoint import initialize_from_pretraining
+        from bgc_detector.model import BGCDetector
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

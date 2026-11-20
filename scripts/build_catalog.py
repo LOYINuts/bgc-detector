@@ -11,8 +11,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from Bio import SeqIO
 
-from bgc_gnn.checkpoint import file_fingerprint, write_metadata
-from bgc_gnn.dataset import normalize_strand, normalize_translation
+from bgc_detector.checkpoint import file_fingerprint, write_metadata
+from bgc_detector.dataset import normalize_strand, normalize_translation
 
 
 def read_genes(

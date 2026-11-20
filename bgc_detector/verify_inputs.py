@@ -7,7 +7,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from bgc_gnn.checkpoint import file_fingerprint
+from bgc_detector.checkpoint import file_fingerprint
 
 
 def identity(path: Path) -> dict:

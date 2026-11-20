@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from Bio import SeqIO
 
-from bgc_gnn.checkpoint import file_fingerprint, runtime_metadata
+from bgc_detector.checkpoint import file_fingerprint, runtime_metadata
 from scripts.build_pretraining_data import protein_sequence, sequence_id
 
 

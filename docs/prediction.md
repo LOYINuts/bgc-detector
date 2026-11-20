@@ -30,7 +30,7 @@
 
 ## 与评测一致
 
-GenBank 解析和窗口打分只有一份实现（`bgc_gnn/predict.py`），`scripts/eval_ng.py` 与 CLI
+GenBank 解析和窗口打分只有一份实现（`bgc_detector/predict.py`），`scripts/eval_ng.py` 与 CLI
 都调用它。核对条件：seed 1506 checkpoint、NG 九基因组、同一份 NG embedding、`--threshold checkpoint`。
 
 | 项 | 结果 |

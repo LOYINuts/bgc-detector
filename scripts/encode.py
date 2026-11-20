@@ -25,8 +25,8 @@ import pyarrow.parquet as pq
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from bgc_gnn.dataset import normalize_strand, normalize_translation
-from bgc_gnn.esmc import (
+from bgc_detector.dataset import normalize_strand, normalize_translation
+from bgc_detector.esmc import (
     EMBEDDING_DIM,
     ESMC_MODEL,
     last_hidden,

@@ -1,6 +1,6 @@
 """Check that the repo's ESMC path reproduces the frozen training embeddings.
 
-Runs `bgc_gnn.esmc.embed_sequences` -- the same function `bgc-detector predict`
+Runs `bgc_detector.esmc.embed_sequences` -- the same function `bgc-detector predict`
 uses -- on a few NG genes and compares against the frozen parquet. Any change to
 the loader must keep max |delta| near 4e-3.
 
@@ -18,7 +18,7 @@ import torch
 from Bio import SeqIO
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from bgc_gnn.esmc import embed_sequences  # noqa: E402
+from bgc_detector.esmc import embed_sequences  # noqa: E402
 
 EMB = "/home/gonghang/codes/my-bgc-v2/data/derived/ng_embeddings/ng_gene_embeddings_960d.parquet"
 GBK = "/home/gonghang/codes/my-bgc-v2/data/raw/ng/ClusterFinder_Annotated_Contigs.full.gbk"

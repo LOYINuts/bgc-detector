@@ -13,7 +13,7 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import torch
 
-from bgc_gnn.checkpoint import file_fingerprint, runtime_metadata
+from bgc_detector.checkpoint import file_fingerprint, runtime_metadata
 from scripts.build_pretraining_data import protein_sequence, sequence_id
 
 

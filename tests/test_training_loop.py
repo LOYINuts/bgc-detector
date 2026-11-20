@@ -11,9 +11,9 @@ import pyarrow.parquet as pq
 import torch
 from torch.optim.swa_utils import AveragedModel, get_ema_multi_avg_fn
 
-from bgc_gnn import train
-from bgc_gnn.checkpoint import load_checkpoint, save_checkpoint
-from bgc_gnn.model import ARCHITECTURE, BGCDetector
+from bgc_detector import train
+from bgc_detector.checkpoint import load_checkpoint, save_checkpoint
+from bgc_detector.model import ARCHITECTURE, BGCDetector
 
 
 class TinyDetector(torch.nn.Module):

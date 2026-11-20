@@ -7,8 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from bgc_gnn.checkpoint import file_fingerprint
-from bgc_gnn.verify_inputs import verify_inputs
+from bgc_detector.checkpoint import file_fingerprint
+from bgc_detector.verify_inputs import verify_inputs
 
 
 class VerificationTest(unittest.TestCase):
@@ -55,14 +55,15 @@ class VerificationTest(unittest.TestCase):
             data, cache = self.fixture(root)
             receipt = root / "receipt.json"
             with patch(
-                "bgc_gnn.verify_inputs.file_fingerprint", wraps=file_fingerprint
+                "bgc_detector.verify_inputs.file_fingerprint", wraps=file_fingerprint
             ) as fp:
                 original = verify_inputs(data, cache, write_to=receipt)
             self.assertEqual(fp.call_count, 7)
             self.assertEqual(original["provenance"]["mode"], "full_sha256")
             for _ in range(2):
                 with patch(
-                    "bgc_gnn.verify_inputs.file_fingerprint", wraps=file_fingerprint
+                    "bgc_detector.verify_inputs.file_fingerprint",
+                    wraps=file_fingerprint,
                 ) as fp:
                     actual = verify_inputs(data, cache, receipt)
                 self.assertEqual(actual["inputs"], original["inputs"])
@@ -113,7 +114,7 @@ class VerificationTest(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "bgc_gnn.pretrain",
+                    "bgc_detector.pretrain",
                     "--data-dir",
                     str(data),
                     "--cache-dir",

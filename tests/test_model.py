@@ -4,12 +4,12 @@ from pathlib import Path
 
 import torch
 
-from bgc_gnn import train
-from bgc_gnn.checkpoint import (
+from bgc_detector import train
+from bgc_detector.checkpoint import (
     initialize_from_pretraining,
     save_checkpoint,
 )
-from bgc_gnn.model import ARCHITECTURE, BGCDetector
+from bgc_detector.model import ARCHITECTURE, BGCDetector
 
 
 class FinalModelTest(unittest.TestCase):

@@ -38,16 +38,16 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
-from bgc_gnn.checkpoint import validation_threshold
-from bgc_gnn.predict import (
+from bgc_detector.checkpoint import validation_threshold
+from bgc_detector.predict import (
     STRIDE,
     load_detector,
     mean_scores,
 )
-from bgc_gnn.predict import (
+from bgc_detector.predict import (
     gene_order as contig_order,
 )
-from bgc_gnn.predict import (
+from bgc_detector.predict import (
     parse_gbk as parse_ng_gbk,
 )
 

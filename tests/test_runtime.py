@@ -4,14 +4,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from bgc_gnn.runtime import configure_cpu_threads, prefetch_file
+from bgc_detector.runtime import configure_cpu_threads, prefetch_file
 
 
 class RuntimeTest(unittest.TestCase):
     def test_thread_count_uses_runner_environment_and_rejects_invalid_values(self):
         with (
             patch.dict(os.environ, {"OMP_NUM_THREADS": "3"}),
-            patch("bgc_gnn.runtime.torch.set_num_threads") as setter,
+            patch("bgc_detector.runtime.torch.set_num_threads") as setter,
         ):
             self.assertEqual(configure_cpu_threads(), 3)
             setter.assert_called_once_with(3)

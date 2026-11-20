@@ -11,9 +11,15 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 
-from bgc_gnn.checkpoint import file_fingerprint, git_commit, validation_threshold
-from bgc_gnn.esmc import EMBEDDING_DIM, ESMC_MODEL, MAX_TOKS, embed_sequences
-from bgc_gnn.predict import STRIDE, gene_order, load_detector, mean_scores, parse_gbk
+from bgc_detector.checkpoint import file_fingerprint, git_commit, validation_threshold
+from bgc_detector.esmc import EMBEDDING_DIM, ESMC_MODEL, MAX_TOKS, embed_sequences
+from bgc_detector.predict import (
+    STRIDE,
+    gene_order,
+    load_detector,
+    mean_scores,
+    parse_gbk,
+)
 
 GENES_HEADER = "contig\tgene_id\tlocus_tag\tstart\tend\tstrand\tscore\tpredicted"
 REGIONS_HEADER = "contig\tstart\tend\tn_genes\tmean_score\tmax_score"

@@ -5,8 +5,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from bgc_gnn.checkpoint import load_checkpoint, validation_threshold
-from bgc_gnn.eval import select_detection_threshold
+from bgc_detector.checkpoint import load_checkpoint, validation_threshold
+from bgc_detector.eval import select_detection_threshold
 
 
 class ThresholdCalibrationTest(unittest.TestCase):

@@ -15,10 +15,10 @@ from Bio.Seq import Seq
 from Bio.SeqFeature import FeatureLocation, SeqFeature
 from Bio.SeqRecord import SeqRecord
 
-from bgc_gnn.checkpoint import save_checkpoint
-from bgc_gnn.cli import main
-from bgc_gnn.model import ARCHITECTURE, BGCDetector
-from bgc_gnn.predict import load_detector
+from bgc_detector.checkpoint import save_checkpoint
+from bgc_detector.cli import main
+from bgc_detector.model import ARCHITECTURE, BGCDetector
+from bgc_detector.predict import load_detector
 
 
 def write_genome(path: Path, contigs: list[tuple[str, int]]) -> None:
@@ -175,7 +175,7 @@ class CommandLineTest(unittest.TestCase):
                 return np.full((len(sequences), 960), 0.9, dtype=np.float32)
 
             with (
-                patch("bgc_gnn.cli.embed_sequences", fake_embed),
+                patch("bgc_detector.cli.embed_sequences", fake_embed),
                 contextlib.redirect_stdout(io.StringIO()),
             ):
                 main(
@@ -199,7 +199,7 @@ class CommandLineTest(unittest.TestCase):
             self.assertEqual(provenance["n_scored"], 4)
 
             with (
-                patch("bgc_gnn.cli.embed_sequences") as embed,
+                patch("bgc_detector.cli.embed_sequences") as embed,
                 contextlib.redirect_stdout(io.StringIO()),
             ):
                 main(
@@ -356,7 +356,7 @@ class CommandLineTest(unittest.TestCase):
             write_checkpoint(checkpoint)
             with (
                 patch(
-                    "bgc_gnn.cli.embed_sequences",
+                    "bgc_detector.cli.embed_sequences",
                     lambda sequences, device, max_toks: np.full(
                         (len(sequences), 960), 0.5, dtype=np.float32
                     ),
@@ -410,14 +410,14 @@ class CommandLineTest(unittest.TestCase):
             loader = Mock(wraps=load_detector)
             with (
                 patch(
-                    "bgc_gnn.cli.embed_sequences",
+                    "bgc_detector.cli.embed_sequences",
                     lambda sequences, device, max_toks: np.full(
                         (len(sequences), 960), 0.5, dtype=np.float32
                     ),
                 ),
-                patch("bgc_gnn.cli.load_detector", loader),
+                patch("bgc_detector.cli.load_detector", loader),
                 patch(
-                    "bgc_gnn.cli.mean_scores",
+                    "bgc_detector.cli.mean_scores",
                     Mock(
                         side_effect=lambda model, emb, order, device: (
                             {gid: 0.7 for gids in order.values() for gid in gids},

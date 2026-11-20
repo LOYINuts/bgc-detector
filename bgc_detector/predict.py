@@ -15,9 +15,9 @@ import torch
 from Bio import SeqIO
 from tqdm import tqdm
 
-from bgc_gnn.checkpoint import load_checkpoint, validate_architecture
-from bgc_gnn.dataset import normalize_strand, normalize_translation
-from bgc_gnn.model import WINDOW_SIZE, BGCDetector
+from bgc_detector.checkpoint import load_checkpoint, validate_architecture
+from bgc_detector.dataset import normalize_strand, normalize_translation
+from bgc_detector.model import WINDOW_SIZE, BGCDetector
 
 STRIDE = 64
 

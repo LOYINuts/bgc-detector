@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 import pyarrow.parquet as pq
 
-from bgc_gnn.checkpoint import file_fingerprint, runtime_metadata
+from bgc_detector.checkpoint import file_fingerprint, runtime_metadata
 
 
 def plan(data_dir, reuse_cache, output_dir):

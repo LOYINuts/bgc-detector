@@ -12,7 +12,7 @@ from Bio.Seq import Seq
 from Bio.SeqFeature import FeatureLocation, SeqFeature
 from Bio.SeqRecord import SeqRecord
 
-from bgc_gnn.dataset import _source_runs
+from bgc_detector.dataset import _source_runs
 from scripts.audit_antismash import audit_assembly
 from scripts.audit_antismash import main as audit_main
 from scripts.build_catalog import build_catalog, read_genes
