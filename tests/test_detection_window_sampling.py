@@ -162,6 +162,9 @@ class FixedDatasetTest(unittest.TestCase):
             self.present = present
             self._map = {gene_id: np.ones(4, dtype=np.float32) for gene_id in present}
 
+        def __getitem__(self, gene_id):
+            return self._map[gene_id]
+
         def __contains__(self, gene_id):
             return gene_id in self.present
 

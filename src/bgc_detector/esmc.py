@@ -7,7 +7,7 @@ checkpoint's layout (it produces a 2560-wide model with no shared keys), which i
 why the package is used here.
 
 Check any change against the frozen NG embeddings with
-``uv run scripts/check_esmc.py``: max |delta| must stay near 4e-3.
+``uv run python -m scripts.tools.check_esmc``: max |delta| must stay near 4e-3.
 """
 
 from __future__ import annotations

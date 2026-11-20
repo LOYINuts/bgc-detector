@@ -47,6 +47,9 @@ class EmbeddingStore:
         }
         self.emb_dim: int = next(iter(self._map.values())).shape[0] if self._map else 0
 
+    def __getitem__(self, gene_id: str) -> np.ndarray:
+        return self._map[gene_id]
+
     def get(self, gene_ids: list[str]) -> np.ndarray:
         """Return [L, D] float32 array."""
         return np.stack([self._map[gid] for gid in gene_ids]).astype(np.float32)
@@ -296,7 +299,7 @@ class FixedBGCDataset(Dataset):
         embs = np.zeros((len(gids), self.emb_dim), dtype=np.float32)
         for i, gid in enumerate(gids):
             if gid in self.store:
-                embs[i] = self.store._map[gid]
+                embs[i] = self.store[gid]
         valid = (
             torch.tensor(self.valid_masks[idx], dtype=torch.bool)
             if self.valid_masks is not None

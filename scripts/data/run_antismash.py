@@ -4,7 +4,7 @@ Requires an external antiSMASH installation and its databases. Audit outputs
 with audit_antismash.py before building pretraining windows.
 
 Usage:
-    uv run python scripts/run_antismash.py --indir data/raw/gtdb/genomes
+    uv run python -m scripts.data.run_antismash --indir data/raw/gtdb/genomes
 """
 
 from __future__ import annotations

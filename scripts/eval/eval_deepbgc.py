@@ -11,7 +11,7 @@ In the full unique-gene block an unscored gene is imputed 0.0, which is what Dee
 effectively does when it decodes regions from scores.
 
 Usage (on the server, project venv):
-    uv run python scripts/eval_deepbgc.py \
+    uv run python scripts/eval/eval_deepbgc.py \
         --deepbgc-glob '~/bgc_deepbgc/out/*/*.full.gbk' \
         --out ~/bgc_deepbgc/out/deepbgc_ng_metrics.json
 """

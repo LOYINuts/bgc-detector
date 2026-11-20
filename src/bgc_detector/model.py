@@ -58,7 +58,9 @@ class GRUBlock(nn.Module):
         if key_padding_mask is None:
             out, _ = self.gru(x)
         else:
-            lengths = (~key_padding_mask).sum(1).cpu()
+            # A fully padded row has length 0, which pack() rejects; clamping
+            # keeps it at "no tokens" instead of raising mid-training.
+            lengths = (~key_padding_mask).sum(1).cpu().clamp(min=1)
             packed = nn.utils.rnn.pack_padded_sequence(
                 x, lengths, batch_first=True, enforce_sorted=False
             )

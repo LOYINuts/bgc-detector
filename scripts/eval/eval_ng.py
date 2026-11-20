@@ -5,11 +5,11 @@ ClusterFinder labels in ``291BGC.csv``. The primary number uses the validation
 threshold saved with the checkpoint; the NG-best threshold scan is reported
 for diagnostics only and must never select a model or a seed.
 
-Requires NG embeddings from ``scripts/encode.py --source ng``.
+Requires NG embeddings from ``scripts.encode.encode --source ng``.
 
 Usage
 -----
-    uv run python scripts/eval_ng.py \
+    uv run python -m scripts.eval.eval_ng \
         --checkpoint runs/seed1301/detector_960d_best.pt \
         --metrics-path runs/seed1301/ng_validation_selected.json
 """
@@ -36,17 +36,9 @@ from sklearn.metrics import (
 )
 
 from bgc_detector.checkpoint import validation_threshold
-from bgc_detector.predict import (
-    STRIDE,
-    load_detector,
-    mean_scores,
-)
-from bgc_detector.predict import (
-    gene_order as contig_order,
-)
-from bgc_detector.predict import (
-    parse_gbk as parse_ng_gbk,
-)
+from bgc_detector.predict import STRIDE, load_detector, mean_scores
+from bgc_detector.predict import gene_order as contig_order
+from bgc_detector.predict import parse_gbk as parse_ng_gbk
 
 # ── paths ───────────────────────────────────────────────────────────────────
 GBK_PATH = Path("data/raw/ng/ClusterFinder_Annotated_Contigs.full.gbk")

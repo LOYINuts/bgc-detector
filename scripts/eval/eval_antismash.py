@@ -20,13 +20,13 @@ AUROC/AUPRC are computed on that 5-level score, so they rank tiers, not genes:
 within a tier all genes tie. The `binary_variants` block gives the honest
 deployment numbers, because that is what antiSMASH actually decides.
 
-Blocks mirror scripts/eval_deepbgc.py so numbers stay comparable:
+Blocks mirror scripts/eval/eval_deepbgc.py so numbers stay comparable:
 
   unique_genes         one score per gene (unit of the overlap stride64/mean entry)
   in_region_subset     only genes inside an antiSMASH region (coverage block)
 
 Usage (on the server, project venv):
-    uv run python scripts/eval_antismash.py \
+    uv run python -m scripts.eval.eval_antismash \
         --antismash-glob '~/bgc_antismash/out/ng_full/*.gbk' \
         --out ~/bgc_antismash/out/antismash_ng_metrics.json
 """

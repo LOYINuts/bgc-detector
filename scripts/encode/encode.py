@@ -8,8 +8,8 @@ Sources
 
 Usage
 -----
-    uv run python scripts/encode.py --source catalog --catalog-dir data/derived/catalog
-    uv run python scripts/encode.py --source ng
+    uv run python -m scripts.encode.encode --source catalog --catalog-dir data/derived/catalog
+    uv run python -m scripts.encode.encode --source ng
 """
 
 from __future__ import annotations
