@@ -10,12 +10,22 @@ cd bgc-detecctor
 uv sync --locked          # Python 3.12，全部依赖（含 esm）
 ```
 
-还要 ESMC-300M 权重（约 1.3 GB，不随仓库分发）。第一次 `predict` 会自动从 Hugging Face
-下载到 `HF_HOME` 缓存；也可以先手动拉：
+### 还要有 ESMC-300M 权重（约 1.3 GB，不随仓库分发）
+
+两种方式，任选其一：
 
 ```bash
-hf download biohub/ESMC-300M
+hf download biohub/ESMC-300M        # 方式一：先下到 HF 缓存（默认 HF_HOME）
 ```
+
+或者方式二：**不下载**，直接把已有权重目录交给 CLI：
+
+```bash
+uv run bgc-detector predict ... --esmc-path /path/to/ESMC-300M-snapshot
+```
+
+也可以设环境变量 `BGC_DETECTOR_ESMC=/path/to/snapshot` 省掉每次传参。
+既不给路径也没有缓存时，第一次 `predict` 会自动下载到 `HF_HOME`（需要有网）。
 
 离线机器用本地缓存即可，加 `HF_HUB_OFFLINE=1`，缺失就直接报错、不会偷偷联网。完全断网时
 `uv run` 可能卡在解析上，环境已同步过就用 `uv run --no-sync ...` 跳过这一步。
@@ -54,7 +64,7 @@ uv run bgc-detector predict \
 | 文件 | 内容 |
 | --- | --- |
 | `output/genome.genes.tsv` | 每个基因一行：`contig`、`gene_id`、`locus_tag`、`start`、`end`、`strand`、`score`、`predicted` |
-| `output/genome.json` | 溯源：输入与 checkpoint 的 sha256、阈值及来源、窗口 128 / stride 64 / mean / 无后处理、ESMC 模型、基因与窗口计数、代码 commit |
+| `output/genome.json` | 溯源：输入与 checkpoint 的 sha256、阈值及来源、窗口 128 / stride 64 / mean / 无后处理、ESMC 模型与实际加载路径、基因与窗口计数、代码 commit |
 
 `predicted` 就是 `score >= threshold`。BGC 区域靠 TSV 里连续为 1 的行自己读，工具不做区域后处理。
 
@@ -63,6 +73,7 @@ uv run bgc-detector predict \
 - `--threshold`：默认 `0.5`；写 `checkpoint` 用训练时按验证 MCC 选出的阈值；也可给具体数值
 - `--genome a.gbk b.gbk`：一次跑多个基因组，模型只加载一次，各写各的产物
 - `--emb-cache out/genome.emb.parquet`：复用嵌入，第二次预测同一基因组不必重算 ESMC（单个基因组）
+- `--esmc-path`：ESMC 权重目录或 HF 仓库名（默认取最新本地快照，其次 `biohub/ESMC-300M`）
 - `--device cuda:0` 或 `cpu`，默认自动选；`--max-toks` 在显存不足时调小
 
 ### 合并成 BGC 区域

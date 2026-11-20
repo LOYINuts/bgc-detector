@@ -8,11 +8,13 @@ import torch
 
 from bgc_detector.esmc import (
     ESMC_MODEL,
+    ESMC_MODEL_ENV,
     embed_sequences,
     last_hidden,
     load_model,
     local_snapshot,
     pool_batch,
+    resolve_sources,
 )
 
 
@@ -32,7 +34,7 @@ class EsmcLoaderTest(unittest.TestCase):
             patch.dict(sys.modules, modules),
             patch("bgc_detector.esmc.local_snapshot", return_value="/snap/abc"),
         ):
-            model, tokenizer = load_model("cpu")
+            model, tokenizer, source = load_model("cpu")
         esmc.EsmcModel.from_pretrained.assert_called_once_with(
             "/snap/abc", dtype=torch.bfloat16
         )
@@ -41,6 +43,7 @@ class EsmcLoaderTest(unittest.TestCase):
         loaded = esmc.EsmcModel.from_pretrained.return_value.to.return_value
         loaded.eval.assert_called_once_with()
         self.assertIs(model, loaded.eval.return_value)
+        self.assertEqual(source, "/snap/abc")
         self.assertIs(tokenizer, esmc.EsmcTokenizer.from_pretrained.return_value)
 
     def test_the_hub_is_tried_when_no_snapshot_is_cached(self):
@@ -118,7 +121,8 @@ class EsmcLoaderTest(unittest.TestCase):
             "attention_mask": torch.ones(len(batch), 4, dtype=torch.long),
         }
         with patch(
-            "bgc_detector.esmc.load_model", return_value=(Blocking(), tokenizer)
+            "bgc_detector.esmc.load_model",
+            return_value=(Blocking(), tokenizer, "snap"),
         ):
             matrix = embed_sequences(["MKVA", "MKVAG"], torch.device("cpu"))
         self.assertEqual(matrix.shape, (2, 960))
@@ -136,10 +140,39 @@ class EsmcLoaderTest(unittest.TestCase):
             "attention_mask": torch.ones(len(batch), 4, dtype=torch.long),
         }
         with (
-            patch("bgc_detector.esmc.load_model", return_value=(Wide(), tokenizer)),
+            patch(
+                "bgc_detector.esmc.load_model", return_value=(Wide(), tokenizer, "snap")
+            ),
             self.assertRaisesRegex(ValueError, "2560d embeddings, expected 960"),
         ):
             embed_sequences(["MKVA"], torch.device("cpu"))
+
+    def test_an_explicit_path_wins_over_the_cache_and_the_hub(self):
+        with (
+            patch("bgc_detector.esmc.local_snapshot", return_value="/snap/new"),
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            self.assertEqual(
+                resolve_sources("/elsewhere/weights"), ["/elsewhere/weights"]
+            )
+            self.assertEqual(resolve_sources(), ["/snap/new", ESMC_MODEL])
+
+    def test_the_env_var_supplies_the_default_path(self):
+        with patch.dict("os.environ", {ESMC_MODEL_ENV: "/from/env"}):
+            self.assertEqual(resolve_sources(), ["/from/env"])
+
+    def test_a_wrong_explicit_path_does_not_fall_back(self):
+        modules, esmc = esm_modules()
+        esmc.EsmcModel.from_pretrained.side_effect = OSError("no such snapshot")
+        with (
+            patch.dict(sys.modules, modules),
+            patch("bgc_detector.esmc.local_snapshot", return_value="/snap/new"),
+            self.assertRaisesRegex(ValueError, "cannot load ESMC weights"),
+        ):
+            load_model("cpu", "/wrong/path")
+        esmc.EsmcModel.from_pretrained.assert_called_once_with(
+            "/wrong/path", dtype=torch.bfloat16
+        )
 
 
 if __name__ == "__main__":

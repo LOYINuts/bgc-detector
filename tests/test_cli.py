@@ -170,12 +170,16 @@ class CommandLineTest(unittest.TestCase):
             write_checkpoint(checkpoint)
             cache = root / "cache.parquet"
 
-            def fake_embed(sequences, device, max_toks):
+            def fake_embed(model, tokenizer, sequences, device, max_toks):
                 self.assertEqual(len(sequences), 4)
                 return np.full((len(sequences), 960), 0.9, dtype=np.float32)
 
             with (
-                patch("bgc_detector.cli.embed_sequences", fake_embed),
+                patch(
+                    "bgc_detector.cli.load_model",
+                    lambda device, source=None: (Mock(), Mock(), source or "snap"),
+                ),
+                patch("bgc_detector.cli.embed_with", fake_embed),
                 contextlib.redirect_stdout(io.StringIO()),
             ):
                 main(
@@ -199,7 +203,7 @@ class CommandLineTest(unittest.TestCase):
             self.assertEqual(provenance["n_scored"], 4)
 
             with (
-                patch("bgc_detector.cli.embed_sequences") as embed,
+                patch("bgc_detector.cli.load_model") as embed,
                 contextlib.redirect_stdout(io.StringIO()),
             ):
                 main(
@@ -356,8 +360,16 @@ class CommandLineTest(unittest.TestCase):
             write_checkpoint(checkpoint)
             with (
                 patch(
-                    "bgc_detector.cli.embed_sequences",
-                    lambda sequences, device, max_toks: np.full(
+                    "bgc_detector.cli.load_model",
+                    lambda device, source=None: (
+                        Mock(),
+                        Mock(),
+                        source or "snap",
+                    ),
+                ),
+                patch(
+                    "bgc_detector.cli.embed_with",
+                    lambda model, tokenizer, sequences, device, max_toks: np.full(
                         (len(sequences), 960), 0.5, dtype=np.float32
                     ),
                 ),
@@ -414,8 +426,16 @@ class CommandLineTest(unittest.TestCase):
             loader = Mock(wraps=load_detector)
             with (
                 patch(
-                    "bgc_detector.cli.embed_sequences",
-                    lambda sequences, device, max_toks: np.full(
+                    "bgc_detector.cli.load_model",
+                    lambda device, source=None: (
+                        Mock(),
+                        Mock(),
+                        source or "snap",
+                    ),
+                ),
+                patch(
+                    "bgc_detector.cli.embed_with",
+                    lambda model, tokenizer, sequences, device, max_toks: np.full(
                         (len(sequences), 960), 0.5, dtype=np.float32
                     ),
                 ),
@@ -506,6 +526,44 @@ class CommandLineTest(unittest.TestCase):
             self.assertEqual(
                 len((Path(tmp) / "run.regions.tsv").read_text().splitlines()), 1
             )
+
+    def test_esmc_path_is_recorded_in_the_provenance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            genome = root / "genome.gbk"
+            write_genome(genome, [("ctg", 2)])
+            checkpoint = root / "detector.pt"
+            write_checkpoint(checkpoint)
+            with (
+                patch(
+                    "bgc_detector.cli.load_model",
+                    lambda device, source=None: (Mock(), Mock(), source),
+                ),
+                patch(
+                    "bgc_detector.cli.embed_with",
+                    lambda model, tokenizer, sequences, device, max_toks: np.full(
+                        (len(sequences), 960), 0.5, dtype=np.float32
+                    ),
+                ),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                main(
+                    [
+                        "predict",
+                        "--genome",
+                        str(genome),
+                        "--checkpoint",
+                        str(checkpoint),
+                        "--outdir",
+                        str(root / "out"),
+                        "--esmc-path",
+                        "/opt/esmc/snapshot",
+                        "--device",
+                        "cpu",
+                    ]
+                )
+            provenance = json.loads((root / "out/genome.json").read_text())
+            self.assertEqual(provenance["esmc_source"], "/opt/esmc/snapshot")
 
 
 if __name__ == "__main__":

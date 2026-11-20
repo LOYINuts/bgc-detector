@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -12,7 +13,13 @@ import pyarrow.parquet as pq
 import torch
 
 from bgc_detector.checkpoint import file_fingerprint, git_commit, validation_threshold
-from bgc_detector.esmc import EMBEDDING_DIM, ESMC_MODEL, MAX_TOKS, embed_sequences
+from bgc_detector.esmc import (
+    EMBEDDING_DIM,
+    ESMC_MODEL,
+    MAX_TOKS,
+    embed_with,
+    load_model,
+)
 from bgc_detector.predict import (
     STRIDE,
     gene_order,
@@ -92,8 +99,24 @@ def _threshold(value: str, metadata: dict) -> tuple[float, str]:
     return threshold, "fixed"
 
 
+class _EsmcOnDemand:
+    """Load the ESMC weights once, and only if a genome actually needs them."""
+
+    def __init__(self, device: torch.device, source: str | Path | None):
+        self.device = device
+        self.source = source
+        self.loaded: tuple[torch.nn.Module, object, str] | None = None
+
+    def get(self) -> tuple[torch.nn.Module, object, str]:
+        if self.loaded is None:
+            self.loaded = load_model(self.device, self.source)
+        return self.loaded
+
+
 def _embeddings_for(
-    genes: list[dict], args: argparse.Namespace, device: torch.device
+    genes: list[dict],
+    args: argparse.Namespace,
+    esmc: _EsmcOnDemand,
 ) -> tuple[dict[str, np.ndarray], dict[str, object]]:
     """Gene embeddings for one genome, reusing ``--emb-cache`` when present."""
     gene_ids = [g["gene_id"] for g in genes if g["translation"]]
@@ -110,8 +133,13 @@ def _embeddings_for(
     if missing:
         print(f"Embedding {len(missing):,} proteins with ESMC-300M ...", flush=True)
         by_id = {g["gene_id"]: g for g in genes}
-        matrix = embed_sequences(
-            [by_id[gid]["translation"] for gid in missing], device, args.max_toks
+        model, tokenizer, _ = esmc.get()
+        matrix = embed_with(
+            model,
+            tokenizer,
+            [by_id[gid]["translation"] for gid in missing],
+            esmc.device,
+            args.max_toks,
         )
         emb_map.update(dict(zip(missing, matrix, strict=True)))
         if args.emb_cache and not reused:
@@ -137,6 +165,7 @@ def _embeddings_for(
         "embeddings_from": source,
         "n_embedded_computed": len(missing),
         "n_embedded_reused": len(emb_map) - len(missing),
+        "esmc_source": esmc.get()[2] if missing else None,
     }
     return emb_map, counts
 
@@ -147,7 +176,7 @@ def _score_genome(
     args: argparse.Namespace,
     model: torch.nn.Module,
     metadata: dict,
-    device: torch.device,
+    esmc: _EsmcOnDemand,
     threshold: float,
     threshold_source: str,
     checkpoint_fingerprint: dict,
@@ -164,9 +193,9 @@ def _score_genome(
             flush=True,
         )
 
-    emb_map, embedding_counts = _embeddings_for(genes, args, device)
+    emb_map, embedding_counts = _embeddings_for(genes, args, esmc)
     order = gene_order(genes, set(emb_map))
-    scores, windows = mean_scores(model, emb_map, order, device)
+    scores, windows = mean_scores(model, emb_map, order, esmc.device)
 
     by_id = {g["gene_id"]: g for g in genes}
     rows = [(accession, gid) for accession, ordered in order.items() for gid in ordered]
@@ -230,6 +259,7 @@ def predict(args: argparse.Namespace) -> None:
     model, metadata = load_detector(args.checkpoint, device)
     threshold, threshold_source = _threshold(args.threshold, metadata)
     checkpoint_fingerprint = file_fingerprint(args.checkpoint)
+    esmc = _EsmcOnDemand(device, args.esmc_path)
     for genome in args.genome:
         stem = args.name or genome.stem
         print(f"Genome: {genome} -> {stem}.genes.tsv", flush=True)
@@ -239,7 +269,7 @@ def predict(args: argparse.Namespace) -> None:
             args,
             model,
             metadata,
-            device,
+            esmc,
             threshold,
             threshold_source,
             checkpoint_fingerprint,
@@ -407,6 +437,14 @@ def main(argv: list[str] | None = None) -> None:
         metavar="PARQUET",
         help="reuse this gene embedding parquet; written only when it does not exist "
         "and only for a single genome",
+    )
+    predict_parser.add_argument(
+        "--esmc-path",
+        default=os.environ.get("BGC_DETECTOR_ESMC"),
+        metavar="PATH|REPO",
+        help="ESMC-300M weights: a local snapshot directory or a Hugging Face repo "
+        "id (default: newest local snapshot, else biohub/ESMC-300M; env "
+        "BGC_DETECTOR_ESMC)",
     )
     predict_parser.add_argument(
         "--max-toks",
