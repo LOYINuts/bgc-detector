@@ -323,7 +323,10 @@ def main() -> None:
 
     for path in args.our_scores:
         data = np.load(Path(path).expanduser(), allow_pickle=False)
-        ours = {str(g): float(s) for g, s in zip(data["gene_ids"], data["scores"])}
+        ours = {
+            str(g): float(s)
+            for g, s in zip(data["gene_ids"], data["scores"], strict=True)
+        }
         common = [gene_id for gene_id in unique_ids if gene_id in ours]
         if not common:
             print(f"  {path}: no overlapping genes, skipped", flush=True)

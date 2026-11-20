@@ -39,7 +39,9 @@ def _read_embeddings(path: Path) -> dict[str, np.ndarray]:
     return {
         gid: np.array(emb, dtype=np.float32)
         for gid, emb in zip(
-            table.column("gene_id").to_pylist(), table.column("embedding").to_pylist()
+            table.column("gene_id").to_pylist(),
+            table.column("embedding").to_pylist(),
+            strict=True,
         )
     }
 
@@ -111,7 +113,7 @@ def _embeddings_for(
         matrix = embed_sequences(
             [by_id[gid]["translation"] for gid in missing], device, args.max_toks
         )
-        emb_map.update(dict(zip(missing, matrix)))
+        emb_map.update(dict(zip(missing, matrix, strict=True)))
         if args.emb_cache and not reused:
             # Never rewrite a cache that already existed: it may be shared input.
             _write_embeddings(
@@ -275,7 +277,7 @@ def _merge_regions(rows: list[list[str]], max_gap: int, min_count: int) -> list[
             gap += 1
     if current is not None:
         regions.append(current)
-    merged = [
+    return [
         {
             "contig": region["contig"],
             "start": region["start"],
@@ -285,7 +287,6 @@ def _merge_regions(rows: list[list[str]], max_gap: int, min_count: int) -> list[
         for region in regions
         if len(region["scores"]) >= min_count
     ]
-    return merged
 
 
 def _regions_path(genes: Path) -> Path:

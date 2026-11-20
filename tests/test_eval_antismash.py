@@ -46,9 +46,8 @@ def write_genbank(text: str) -> str:
     seq = "acgt" * 50
     lines = [seq[i : i + 60] for i in range(0, 200, 60)]
     body = "\n".join(f"{i * 60 + 1:9d} {line}" for i, line in enumerate(lines))
-    handle = tempfile.NamedTemporaryFile("w", suffix=".gbk", delete=False)
-    handle.write(text.replace("{seq}", body))
-    handle.close()
+    with tempfile.NamedTemporaryFile("w", suffix=".gbk", delete=False) as handle:
+        handle.write(text.replace("{seq}", body))
     return handle.name
 
 

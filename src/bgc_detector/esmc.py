@@ -51,7 +51,7 @@ def load_model(device):
             tokenizer = EsmcTokenizer.from_pretrained(source)
             print(f"ESMC loaded from: {source}", flush=True)
             return model.to(device).eval(), tokenizer
-        except Exception as exc:  # noqa: BLE001 - fall through to the next source
+        except Exception as exc:
             error = exc
     raise ValueError(f"cannot load {ESMC_MODEL}: {type(error).__name__}: {error}")
 

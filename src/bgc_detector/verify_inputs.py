@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from bgc_detector.checkpoint import file_fingerprint
@@ -12,14 +12,14 @@ from bgc_detector.checkpoint import file_fingerprint
 
 def identity(path: Path) -> dict:
     stat = path.stat()
-    return dict(
-        path=str(path.resolve()),
-        size=stat.st_size,
-        mtime_ns=stat.st_mtime_ns,
-        ctime_ns=stat.st_ctime_ns,
-        device=stat.st_dev,
-        inode=stat.st_ino,
-    )
+    return {
+        "path": str(path.resolve()),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+        "ctime_ns": stat.st_ctime_ns,
+        "device": stat.st_dev,
+        "inode": stat.st_ino,
+    }
 
 
 def verify_inputs(
@@ -79,7 +79,7 @@ def verify_inputs(
         "version": 1,
         "status": "verified",
         "manifests": manifests,
-        "verified_at": datetime.now(timezone.utc).isoformat(),
+        "verified_at": datetime.now(UTC).isoformat(),
         "inputs": inputs,
         "identities": identities,
     }

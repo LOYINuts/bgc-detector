@@ -89,7 +89,7 @@ def evaluate_block(y_true: np.ndarray, y_score: np.ndarray) -> dict:
     n_pos = int(y_true.sum())
     prevalence = n_pos / len(y_true) if len(y_true) else 0.0
     block = {
-        "n_genes": int(len(y_true)),
+        "n_genes": len(y_true),
         "n_pos": n_pos,
         "n_neg": int(len(y_true) - n_pos),
         "auroc": float(roc_auc_score(y_true, y_score))
@@ -245,7 +245,10 @@ def main() -> None:
 
     for path in args.our_scores:
         data = np.load(Path(path).expanduser(), allow_pickle=False)
-        ours = {str(g): float(s) for g, s in zip(data["gene_ids"], data["scores"])}
+        ours = {
+            str(g): float(s)
+            for g, s in zip(data["gene_ids"], data["scores"], strict=True)
+        }
         our_columns[Path(path).expanduser().parent.name] = ours
         common = [
             gene_id
@@ -296,8 +299,14 @@ def main() -> None:
         with open(gene_table, "w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(
-                ["gene_id", "contig", "locus_tag", "label", "deepbgc_score"]
-                + list(our_columns)
+                [
+                    "gene_id",
+                    "contig",
+                    "locus_tag",
+                    "label",
+                    "deepbgc_score",
+                    *list(our_columns),
+                ]
             )
             for gene_id in unique_ids:
                 contig, locus_tag = gene_id.split(":", 1)

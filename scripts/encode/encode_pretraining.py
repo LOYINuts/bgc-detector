@@ -75,7 +75,7 @@ def reuse_cached_embeddings(proteins, cache_dir, array):
         ]
         if not pairs:
             continue
-        source, target = zip(*pairs)
+        source, target = zip(*pairs, strict=True)
         values = old[list(source)]
         if not np.isfinite(values).all():
             raise ValueError("reuse cache contains non-finite values")

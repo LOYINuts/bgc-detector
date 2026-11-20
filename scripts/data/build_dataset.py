@@ -93,7 +93,7 @@ def main():
     random.seed(SEED)
     train, val = split_samples(generate_samples(dataset, N_NEGATIVE))
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    for path, samples in zip(paths, [train, val]):
+    for path, samples in zip(paths, [train, val], strict=True):
         pq.write_table(_to_table(samples), path)
         print(f"Saved {len(samples):,} samples -> {path}")
 

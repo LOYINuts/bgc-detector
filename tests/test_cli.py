@@ -387,14 +387,18 @@ class CommandLineTest(unittest.TestCase):
 
     def test_help_documents_both_commands(self):
         for argv in (["--help"], ["predict", "--help"], ["info", "--help"]):
-            with contextlib.redirect_stdout(io.StringIO()) as out:
-                with self.assertRaises(SystemExit) as exit_info:
-                    main(argv)
+            with (
+                contextlib.redirect_stdout(io.StringIO()) as out,
+                self.assertRaises(SystemExit) as exit_info,
+            ):
+                main(argv)
             self.assertEqual(exit_info.exception.code, 0)
             self.assertIn("--checkpoint", out.getvalue())
-        with contextlib.redirect_stdout(io.StringIO()) as out:
-            with self.assertRaises(SystemExit):
-                main(["predict", "--help"])
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            self.assertRaises(SystemExit),
+        ):
+            main(["predict", "--help"])
         text = out.getvalue()
         self.assertIn("STEM.genes.tsv", text)
         self.assertIn("checkpoint", text)

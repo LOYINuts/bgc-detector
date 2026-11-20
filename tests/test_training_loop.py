@@ -209,7 +209,9 @@ class TrainingRunTest(unittest.TestCase):
                 if line.startswith("Training learning rates: ")
             ]
             self.assertEqual(len(trace), 7)
-            for actual, factor in zip(trace, [1.0, 1.0, 1.0, 1.0, 1.0, 0.95, 0.95**2]):
+            for actual, factor in zip(
+                trace, [1.0, 1.0, 1.0, 1.0, 1.0, 0.95, 0.95**2], strict=True
+            ):
                 self.assertAlmostEqual(actual[0], 0.0001 * factor)
                 self.assertAlmostEqual(actual[1], 0.0005 * factor)
             state, metadata = load_checkpoint(

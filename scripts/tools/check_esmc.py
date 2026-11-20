@@ -17,7 +17,7 @@ import pyarrow.parquet as pq
 import torch
 from Bio import SeqIO
 
-from bgc_detector.esmc import embed_sequences  # noqa: E402
+from bgc_detector.esmc import embed_sequences
 
 DATA_ROOT = Path("/home/gonghang/codes/my-bgc-v2/data")
 EMB = DATA_ROOT / "derived/ng_embeddings/ng_gene_embeddings_960d.parquet"
@@ -70,7 +70,9 @@ def main() -> int:
     frozen = {
         gene_id: np.array(vec, dtype=np.float32)
         for gene_id, vec in zip(
-            table.column("gene_id").to_pylist(), table.column("embedding").to_pylist()
+            table.column("gene_id").to_pylist(),
+            table.column("embedding").to_pylist(),
+            strict=True,
         )
     }
 

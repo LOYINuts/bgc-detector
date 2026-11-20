@@ -113,7 +113,9 @@ def evaluate_model(
     emb_map: dict[str, np.ndarray] = {}
     table = pq.read_table(emb_path if emb_path is not None else _embedding_path())
     for gid, emb in zip(
-        table.column("gene_id").to_pylist(), table.column("embedding").to_pylist()
+        table.column("gene_id").to_pylist(),
+        table.column("embedding").to_pylist(),
+        strict=True,
     ):
         if gid in labels:
             emb_map[gid] = np.array(emb, dtype=np.float32)
@@ -124,6 +126,7 @@ def evaluate_model(
             f"(including {sum(labels[g] for g in missing)} positives); "
             "reported metrics cover the remaining genes only.",
             RuntimeWarning,
+            stacklevel=2,
         )
     if not emb_map:
         raise ValueError("NG evaluation requires at least one gene embedding")

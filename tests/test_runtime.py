@@ -16,9 +16,11 @@ class RuntimeTest(unittest.TestCase):
             self.assertEqual(configure_cpu_threads(), 3)
             setter.assert_called_once_with(3)
         for value in ["0", "invalid", "-1"]:
-            with patch.dict(os.environ, {"OMP_NUM_THREADS": value}):
-                with self.assertRaises(ValueError):
-                    configure_cpu_threads()
+            with (
+                patch.dict(os.environ, {"OMP_NUM_THREADS": value}),
+                self.assertRaises(ValueError),
+            ):
+                configure_cpu_threads()
 
     def test_prefetch_closes_descriptor_and_handles_unsupported_filesystems(self):
         with tempfile.TemporaryDirectory() as tmp:

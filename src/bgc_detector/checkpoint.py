@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import platform
@@ -74,10 +75,8 @@ def save_checkpoint(
 def load_checkpoint(
     path: str | Path, device: str | torch.device = "cpu"
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    try:
+    with contextlib.suppress(AttributeError):
         torch.serialization.add_safe_globals([torch.torch_version.TorchVersion])
-    except AttributeError:
-        pass
     payload = torch.load(path, map_location=device, weights_only=True)
     if (
         not isinstance(payload, dict)

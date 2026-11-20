@@ -85,7 +85,10 @@ class PretrainingTest(unittest.TestCase):
         self.assertEqual([sum(w["valid_mask"]) for w in windows], [3, 1, 2])
         for w in windows:
             self.assertFalse(
-                any(m and not v for m, v in zip(w["loss_mask"], w["valid_mask"]))
+                any(
+                    m and not v
+                    for m, v in zip(w["loss_mask"], w["valid_mask"], strict=True)
+                )
             )
         record.features[-1].qualifiers["contig_edge"] = ["True"]
         rows = record_genes(record, set(), boundary_margin=0)
@@ -365,10 +368,11 @@ class PretrainingTest(unittest.TestCase):
                         "attention_mask": torch.ones(len(seqs), 63, dtype=torch.long),
                     }
 
-                def model(**kwargs):
+                def model(_mismatch=mismatch, **kwargs):
                     return SimpleNamespace(
                         last_hidden_state=torch.full(
-                            (*kwargs["input_ids"].shape, 960), 2.0 if mismatch else 1.0
+                            (*kwargs["input_ids"].shape, 960),
+                            2.0 if _mismatch else 1.0,
                         )
                     )
 

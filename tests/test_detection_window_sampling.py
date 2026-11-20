@@ -97,7 +97,7 @@ class DetectionWindowSamplingTest(unittest.TestCase):
             {
                 gene_id
                 for gene_id, is_positive in zip(
-                    sample["gene_ids"], sample["detect_mask"].tolist()
+                    sample["gene_ids"], sample["detect_mask"].tolist(), strict=True
                 )
                 if is_positive
             },

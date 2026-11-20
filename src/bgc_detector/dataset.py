@@ -43,6 +43,7 @@ class EmbeddingStore:
             for gid, emb in zip(
                 table.column("gene_id").to_pylist(),
                 table.column("embedding").to_pylist(),
+                strict=True,
             )
         }
         self.emb_dim: int = next(iter(self._map.values())).shape[0] if self._map else 0
@@ -91,7 +92,9 @@ def _source_runs(entity: dict, namespace: str) -> list[list[str]]:
     if contigs is not None and len(contigs) != len(gene_ids):
         raise ValueError("source contigs must align with source gene IDs")
     previous_contig = None
-    for i, (gene_id, (prefix, position)) in enumerate(zip(gene_ids, positions)):
+    for i, (gene_id, (prefix, position)) in enumerate(
+        zip(gene_ids, positions, strict=True)
+    ):
         contig = contigs[i] if contigs is not None else None
         if (
             not runs
@@ -281,7 +284,9 @@ class FixedBGCDataset(Dataset):
             if len(valid) != len(gids) or len(self.masks[i]) != len(gids):
                 raise ValueError(f"window {i} has misaligned gene IDs and masks")
             missing.update(
-                gid for gid, active in zip(gids, valid) if active and gid not in store
+                gid
+                for gid, active in zip(gids, valid, strict=True)
+                if active and gid not in store
             )
         if missing:
             examples = ", ".join(sorted(missing)[:5])

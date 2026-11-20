@@ -81,19 +81,21 @@ class PretrainingDataset(Dataset):
                     raise ValueError("windows require non-empty valid prefixes")
                 if any(
                     active and sid not in self.index
-                    for sid, active in zip(row["sequence_ids"], valid)
+                    for sid, active in zip(row["sequence_ids"], valid, strict=True)
                 ):
                     raise ValueError("valid window gene missing from cache")
                 if any(
                     supervised and not active
-                    for supervised, active in zip(row["loss_mask"], valid)
+                    for supervised, active in zip(row["loss_mask"], valid, strict=True)
                 ):
                     raise ValueError("loss mask includes padding")
                 self.positive += sum(
-                    t and m for t, m in zip(row["detect_mask"], row["loss_mask"])
+                    t and m
+                    for t, m in zip(row["detect_mask"], row["loss_mask"], strict=True)
                 )
                 self.negative += sum(
-                    not t and m for t, m in zip(row["detect_mask"], row["loss_mask"])
+                    not t and m
+                    for t, m in zip(row["detect_mask"], row["loss_mask"], strict=True)
                 )
 
     def __len__(self):
