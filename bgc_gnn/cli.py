@@ -138,11 +138,9 @@ def predict(args: argparse.Namespace) -> None:
             RuntimeWarning,
         )
 
-    suffix = ""
-    if args.name:
-        suffix = f".{args.name}"
-    genes_path = args.outdir / f"predict{suffix}.genes.tsv"
-    provenance_path = args.outdir / f"predict{suffix}.json"
+    stem = args.name or "predict"
+    genes_path = args.outdir / f"{stem}.genes.tsv"
+    provenance_path = args.outdir / f"{stem}.json"
     args.outdir.mkdir(parents=True, exist_ok=True)
     by_id = {g["gene_id"]: g for g in genes}
     rows = [(accession, gid) for accession, ordered in order.items() for gid in ordered]
@@ -199,33 +197,97 @@ def predict(args: argparse.Namespace) -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="bgc-detector",
-        description="Per-gene BGC detection from frozen ESMC-300M embeddings",
+        description=(
+            "Per-gene BGC detection. Scores every CDS of a GenBank file with the "
+            "trained BGCDetector and writes per-gene probabilities."
+        ),
+        epilog=(
+            "examples:\n"
+            "  bgc-detector info --checkpoint runs/final_seed1506/detector_960d_best.pt\n"
+            "  bgc-detector predict --genome genome.gbk \\\n"
+            "      --checkpoint runs/final_seed1506/detector_960d_best.pt \\\n"
+            "      --threshold checkpoint --name genome\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    commands = parser.add_subparsers(dest="command", required=True)
+    commands = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
-    info_parser = commands.add_parser("info", help="show checkpoint provenance")
-    info_parser.add_argument("--checkpoint", type=Path, required=True)
+    info_parser = commands.add_parser(
+        "info",
+        help="show checkpoint provenance: epoch, selection metric, threshold",
+    )
+    info_parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        required=True,
+        metavar="PT",
+        help="detector checkpoint to inspect",
+    )
     info_parser.set_defaults(handler=info)
 
     predict_parser = commands.add_parser(
-        "predict", help="predict per-gene BGC probability for a GenBank file"
+        "predict",
+        help="score every gene of a GenBank file",
+        description=(
+            "Score every CDS of a GenBank file in fixed 128-gene windows (stride 64) "
+            "and write per-gene BGC probabilities. Genes without a /translation "
+            "qualifier are skipped with a warning."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    predict_parser.add_argument("--genome", type=Path, required=True)
-    predict_parser.add_argument("--checkpoint", type=Path, required=True)
-    predict_parser.add_argument("--outdir", type=Path, default=Path("output"))
-    predict_parser.add_argument("--name", default="", help="output file suffix")
-    predict_parser.add_argument("--device", default=None, help="cuda:0 or cpu")
+    predict_parser.add_argument(
+        "--genome",
+        type=Path,
+        required=True,
+        metavar="GBK",
+        help="GenBank file whose CDS features carry /translation qualifiers",
+    )
+    predict_parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        required=True,
+        metavar="PT",
+        help="validation-selected EMA detector checkpoint",
+    )
+    predict_parser.add_argument(
+        "--outdir",
+        type=Path,
+        default=Path("output"),
+        metavar="DIR",
+        help="output directory (default: output)",
+    )
+    predict_parser.add_argument(
+        "--name",
+        default="",
+        metavar="STEM",
+        help="write STEM.genes.tsv and STEM.json (default: predict)",
+    )
+    predict_parser.add_argument(
+        "--device",
+        default=None,
+        metavar="DEVICE",
+        help="cuda:0 or cpu (default: cuda when available)",
+    )
     predict_parser.add_argument(
         "--emb-cache",
         type=Path,
         default=None,
-        help="reuse this gene embedding parquet, and write it when computing",
+        metavar="PARQUET",
+        help="reuse this gene embedding parquet; written only when it does not exist",
     )
-    predict_parser.add_argument("--max-toks", type=int, default=MAX_TOKS)
+    predict_parser.add_argument(
+        "--max-toks",
+        type=int,
+        default=MAX_TOKS,
+        metavar="N",
+        help=f"tokens per ESMC batch (default: {MAX_TOKS}); lower it if the GPU "
+        "runs out of memory",
+    )
     predict_parser.add_argument(
         "--threshold",
         default="0.5",
-        help="decision threshold in [0, 1], or 'checkpoint' to use the validation "
+        metavar="T",
+        help="decision threshold in [0, 1], or 'checkpoint' for the validation-MCC "
         "threshold stored in the checkpoint (default: 0.5)",
     )
     predict_parser.set_defaults(handler=predict)

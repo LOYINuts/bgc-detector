@@ -126,7 +126,7 @@ class CommandLineTest(unittest.TestCase):
                     ]
                 )
 
-            rows = (outdir / "predict.run1.genes.tsv").read_text().splitlines()
+            rows = (outdir / "run1.genes.tsv").read_text().splitlines()
             self.assertEqual(len(rows), 1 + 133)
             self.assertEqual(
                 rows[0].split("\t"),
@@ -146,7 +146,7 @@ class CommandLineTest(unittest.TestCase):
                 score, predicted = row.split("\t")[6:8]
                 self.assertEqual(int(predicted), int(float(score) >= 0.5))
 
-            provenance = json.loads((outdir / "predict.run1.json").read_text())
+            provenance = json.loads((outdir / "run1.json").read_text())
             self.assertEqual(provenance["threshold"], 0.5)
             self.assertEqual(provenance["threshold_source"], "fixed")
             self.assertIsNone(provenance["threshold_metric"])
@@ -381,6 +381,20 @@ class CommandLineTest(unittest.TestCase):
             provenance = json.loads((root / "out/predict.json").read_text())
             self.assertEqual(provenance["n_scored"], 2)
             self.assertEqual(provenance["embeddings_from"], "cache")
+
+    def test_help_documents_both_commands(self):
+        for argv in (["--help"], ["predict", "--help"], ["info", "--help"]):
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                with self.assertRaises(SystemExit) as exit_info:
+                    main(argv)
+            self.assertEqual(exit_info.exception.code, 0)
+            self.assertIn("--checkpoint", out.getvalue())
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            with self.assertRaises(SystemExit):
+                main(["predict", "--help"])
+        text = out.getvalue()
+        self.assertIn("STEM.genes.tsv", text)
+        self.assertIn("checkpoint", text)
 
 
 if __name__ == "__main__":
