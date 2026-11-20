@@ -97,7 +97,7 @@ ESMC-300M 960d 每基因嵌入（冻结）
 ```bash
 DATA_ROOT=/path/to/data OUTPUT_ROOT=/path/to/outputs PRETRAIN_REUSE="" \
 SEEDS="1506 1507 1508 1509 1510" GPUS="0 1 2 0 1" \
-bash scripts/run_final.sh
+bash scripts/train/run_final.sh
 ```
 
 每个 seed 依次预训练、正式训练、NG 评估。`PRETRAIN_REUSE` 留空表示从头预训练，
@@ -132,6 +132,6 @@ tests/     uv run python -m unittest discover -s tests
 
 - 窗口依赖相邻基因，短 contig 用尾部环绕补齐；单基因证据不进入模型
 - 现算嵌入是 bf16，与训练时的冻结 parquet 有约 4e-3 的差（量化台阶），预测可用但不逐位相同；
-  `uv run scripts/check_esmc.py` 可复核
+  `uv run python -m scripts.tools.check_esmc` 可复核
 - 判定阈值随 seed 变化（本例 0.69–0.79），报告指标时写清用的是哪一个；同一 checkpoint 在
   NG 上默认 0.5 得 MCC 0.5855，验证阈值得 0.5988

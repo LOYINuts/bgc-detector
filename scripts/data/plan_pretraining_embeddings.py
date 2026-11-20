@@ -5,11 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
-import sys
 from contextlib import closing
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 import pyarrow.parquet as pq
 

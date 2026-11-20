@@ -36,5 +36,5 @@ VAL_DS="$DATA/derived/train_test/dataset_legacy_val.parquet" \
 PRETRAIN_REUSE="" \
 SEEDS="1506 1507 1508 1509 1510" \
 GPUS="0 1 2 0 1" \
-bash scripts/run_final.sh > "$ROOT/logs/run_final.log" 2>&1
+bash scripts/train/run_final.sh > "$ROOT/logs/run_final.log" 2>&1
 echo "=== run_final exit=$? $(date) ==="

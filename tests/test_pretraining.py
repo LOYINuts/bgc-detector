@@ -19,15 +19,15 @@ from Bio.SeqRecord import SeqRecord
 
 from bgc_detector.checkpoint import file_fingerprint, load_checkpoint
 from bgc_detector.pretrain import PretrainingDataset, pretraining_loss
-from scripts.build_pretraining_data import (
+from scripts.data.build_pretraining_data import (
     build,
     contiguous_windows,
     protein_sequence,
     record_genes,
     sequence_id,
 )
-from scripts.encode_pretraining import main as encode_main
-from scripts.encode_pretraining import reuse_cached_embeddings, reuse_embeddings
+from scripts.encode.encode_pretraining import main as encode_main
+from scripts.encode.encode_pretraining import reuse_cached_embeddings, reuse_embeddings
 
 
 class PretrainingTest(unittest.TestCase):
@@ -215,7 +215,7 @@ class PretrainingTest(unittest.TestCase):
             )
 
     def test_embedding_inventory_counts_reuse_and_missing_without_encoding(self):
-        from scripts.plan_pretraining_embeddings import plan
+        from scripts.data.plan_pretraining_embeddings import plan
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -387,7 +387,10 @@ class PretrainingTest(unittest.TestCase):
                 ]
                 with (
                     patch.object(sys, "argv", argv),
-                    patch("scripts.encode.load_model", return_value=(model, tokenizer)),
+                    patch(
+                        "scripts.encode.encode.load_model",
+                        return_value=(model, tokenizer),
+                    ),
                     patch(
                         "importlib.metadata.distribution",
                         return_value=SimpleNamespace(

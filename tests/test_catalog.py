@@ -13,10 +13,10 @@ from Bio.SeqFeature import FeatureLocation, SeqFeature
 from Bio.SeqRecord import SeqRecord
 
 from bgc_detector.dataset import _source_runs
-from scripts.audit_antismash import audit_assembly
-from scripts.audit_antismash import main as audit_main
-from scripts.build_catalog import build_catalog, read_genes
-from scripts.build_pretraining_data import main as build_pretraining_main
+from scripts.data.audit_antismash import audit_assembly
+from scripts.data.audit_antismash import main as audit_main
+from scripts.data.build_catalog import build_catalog, read_genes
+from scripts.data.build_pretraining_data import main as build_pretraining_main
 
 
 def record(identifier):

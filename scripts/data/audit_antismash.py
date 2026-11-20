@@ -5,16 +5,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import sys
 import warnings
 from collections import Counter
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from Bio import SeqIO
 
 from bgc_detector.checkpoint import file_fingerprint, runtime_metadata
-from scripts.build_pretraining_data import protein_sequence, sequence_id
+from scripts.data.build_pretraining_data import protein_sequence, sequence_id
 
 
 def audit_assembly(folder, ng_ids, ng_dna, ng_proteins):

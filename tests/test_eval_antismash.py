@@ -4,7 +4,11 @@ from pathlib import Path
 
 import numpy as np
 
-from scripts.eval_antismash import binary_variants, map_by_coordinates, parse_antismash
+from scripts.eval.eval_antismash import (
+    binary_variants,
+    map_by_coordinates,
+    parse_antismash,
+)
 
 GENBANK = """LOCUS       TESTREC                  200 bp    DNA     linear   BCT 01-JAN-2020
 FEATURES             Location/Qualifiers

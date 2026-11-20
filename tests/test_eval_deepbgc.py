@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from scripts.eval_deepbgc import (
+from scripts.eval.eval_deepbgc import (
     evaluate_block,
     per_contig_blocks,
     remap_locus_tags,

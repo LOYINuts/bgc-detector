@@ -87,7 +87,7 @@ run_one() {
         > "$log_dir/train.log" 2>&1 \
         || { echo "TRAIN FAILED: $log_dir/train.log"; return 1; }
 
-    uv run python -u scripts/eval_ng.py \
+    uv run python -u -m scripts.eval.eval_ng \
         --checkpoint "$run_dir/detector_960d_best.pt" --device "cuda:${gpu}" \
         --ng-gbk "$NG_GBK" --labels "$NG_LABELS" --emb-path "$NG_EMB" \
         --metrics-path "$run_dir/ng_metrics.json" \

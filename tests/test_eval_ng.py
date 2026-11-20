@@ -12,7 +12,7 @@ import torch
 
 from bgc_detector.checkpoint import save_checkpoint
 from bgc_detector.model import ARCHITECTURE, BGCDetector
-from scripts import eval_ng
+from scripts.eval import eval_ng
 
 
 class ScoreDetector(torch.nn.Module):

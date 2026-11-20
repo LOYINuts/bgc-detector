@@ -4,12 +4,12 @@ Runs `bgc_detector.esmc.embed_sequences` -- the same function `bgc-detector pred
 uses -- on a few NG genes and compares against the frozen parquet. Any change to
 the loader must keep max |delta| near 4e-3.
 
-    uv run scripts/check_esmc.py
+    uv run python -m scripts.tools.check_esmc
 """
 
 from __future__ import annotations
 
-import sys
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -17,17 +17,56 @@ import pyarrow.parquet as pq
 import torch
 from Bio import SeqIO
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from bgc_detector.esmc import embed_sequences  # noqa: E402
 
-EMB = "/home/gonghang/codes/my-bgc-v2/data/derived/ng_embeddings/ng_gene_embeddings_960d.parquet"
-GBK = "/home/gonghang/codes/my-bgc-v2/data/raw/ng/ClusterFinder_Annotated_Contigs.full.gbk"
+DATA_ROOT = Path("/home/gonghang/codes/my-bgc-v2/data")
+EMB = DATA_ROOT / "derived/ng_embeddings/ng_gene_embeddings_960d.parquet"
+GBK = DATA_ROOT / "raw/ng/ClusterFinder_Annotated_Contigs.full.gbk"
 N_GENES = 8
 TOLERANCE = 0.02
 
 
 def main() -> int:
-    table = pq.ParquetFile(EMB).read_row_group(0)
+    parser = argparse.ArgumentParser(
+        description=(
+            "Compare freshly computed ESMC embeddings against the frozen NG "
+            "embeddings used for training"
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--emb",
+        type=Path,
+        default=EMB,
+        metavar="PARQUET",
+        help="frozen gene embedding parquet (gene_id + 960d embedding)",
+    )
+    parser.add_argument(
+        "--gbk",
+        type=Path,
+        default=GBK,
+        metavar="GBK",
+        help="GenBank the parquet was built from, for the protein sequences",
+    )
+    parser.add_argument(
+        "--genes",
+        type=int,
+        default=N_GENES,
+        metavar="N",
+        help="how many genes to compare",
+    )
+    parser.add_argument(
+        "--device",
+        default=None,
+        metavar="DEVICE",
+        help="cuda:0 or cpu (default: cuda when available)",
+    )
+    args = parser.parse_args()
+    for path in (args.emb, args.gbk):
+        if not path.is_file():
+            parser.error(f"missing input: {path}")
+
+    table = pq.ParquetFile(args.emb).read_row_group(0)
     frozen = {
         gene_id: np.array(vec, dtype=np.float32)
         for gene_id, vec in zip(
@@ -35,9 +74,9 @@ def main() -> int:
         )
     }
 
-    wanted = sorted(frozen)[:N_GENES]
+    wanted = sorted(frozen)[: args.genes]
     proteins: dict[str, str] = {}
-    for record in SeqIO.parse(GBK, "genbank"):
+    for record in SeqIO.parse(args.gbk.open(encoding="utf-8"), "genbank"):
         accession = record.annotations.get("accessions", [record.id])[0]
         for feature in record.features:
             if feature.type != "CDS":
@@ -57,7 +96,9 @@ def main() -> int:
         print("no gene from the parquet was found in the GenBank; check both paths")
         return 1
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(
+        args.device or ("cuda" if torch.cuda.is_available() else "cpu")
+    )
     computed = embed_sequences([proteins[gene_id] for gene_id in kept], device)
 
     diffs = []

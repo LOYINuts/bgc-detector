@@ -18,16 +18,12 @@ Usage (on the server, project venv):
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 import argparse
 import csv
 import glob
 import json
 from collections import defaultdict
+from pathlib import Path
 
 import numpy as np
 from Bio import SeqIO
@@ -41,7 +37,7 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
-from scripts.eval_ng import CSV_PATH, GBK_PATH, load_labels, parse_ng_gbk
+from scripts.eval.eval_ng import CSV_PATH, GBK_PATH, load_labels, parse_ng_gbk
 
 SCORE_QUALIFIER = "deepbgc_score"
 FIXED_THRESHOLD = 0.5

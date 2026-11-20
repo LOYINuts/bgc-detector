@@ -14,7 +14,7 @@ class EntrypointTest(unittest.TestCase):
         env = os.environ.copy()
         env.pop("PYTHONPATH", None)
         p = subprocess.run(
-            [sys.executable, "scripts/encode.py", "--help"],
+            [sys.executable, "scripts/encode/encode.py", "--help"],
             cwd=ROOT,
             env=env,
             capture_output=True,
@@ -68,7 +68,9 @@ class EntrypointTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             t = Path(tmp)
             (t / "scripts").mkdir()
-            shutil.copyfile(ROOT / "scripts/run_final.sh", t / "scripts/run_final.sh")
+            shutil.copyfile(
+                ROOT / "scripts/train/run_final.sh", t / "scripts/run_final.sh"
+            )
             data_root = t / "external data"
             ng = data_root / "derived/ng_embeddings"
             ng.mkdir(parents=True)

@@ -25,7 +25,7 @@ PRETRAIN_REUSE="" \
 TRAIN_DS=/home/gonghang/codes/my-bgc-v2/data/derived/train_test/dataset_legacy_train.parquet \
 VAL_DS=/home/gonghang/codes/my-bgc-v2/data/derived/train_test/dataset_legacy_val.parquet \
 SEEDS="1506 1507 1508 1509 1510" GPUS="0 1 2 0 1" \
-bash scripts/run_final.sh
+bash scripts/train/run_final.sh
 ```
 
 `TRAIN_DS`/`VAL_DS` 必须显式指向历史文件：数据根下同时存在同名新版
@@ -144,7 +144,7 @@ checkpoint，验证 MCC 选阈值。
 
 ## 第二次独立复现：repro_v7_esm（2026-11-19）
 
-同一条 `scripts/run_final.sh` 链路、同一份输入，在新输出根 `outputs/repro_v7_esm/retrain`
+同一条 `scripts/train/run_final.sh` 链路、同一份输入，在新输出根 `outputs/repro_v7_esm/retrain`
 重跑一遍（commit `5f753b6`，启动 2026-11-19 05:45:29 EST，结束 11-20 03:0x EST）。
 
 结论：5 个 seed 的 NG 指标、阈值、预训练选点与 repro_v6 **逐位相同**（`abs diff < 1e-12`）。

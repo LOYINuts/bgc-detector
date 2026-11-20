@@ -33,14 +33,10 @@ Usage (on the server, project venv):
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 import argparse
 import glob
 import json
+from pathlib import Path
 
 import numpy as np
 from Bio import SeqIO
@@ -52,13 +48,13 @@ from sklearn.metrics import (
     recall_score,
 )
 
-from scripts.eval_deepbgc import (
+from scripts.eval.eval_deepbgc import (
     evaluate_block,
     per_contig_blocks,
     score_vectors,
     unique_gene_order,
 )
-from scripts.eval_ng import CSV_PATH, GBK_PATH, load_labels, parse_ng_gbk
+from scripts.eval.eval_ng import CSV_PATH, GBK_PATH, load_labels, parse_ng_gbk
 
 GENE_KIND_SCORES = {
     "biosynthetic": 0.90,

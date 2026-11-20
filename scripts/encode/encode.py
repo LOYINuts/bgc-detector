@@ -15,7 +15,6 @@ Usage
 from __future__ import annotations
 
 import argparse
-import sys
 import time
 from datetime import timedelta
 from pathlib import Path
@@ -24,7 +23,6 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from bgc_detector.dataset import normalize_strand, normalize_translation
 from bgc_detector.esmc import (
     EMBEDDING_DIM,

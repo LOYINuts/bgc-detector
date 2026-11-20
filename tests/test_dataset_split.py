@@ -1,7 +1,7 @@
 import random
 import unittest
 
-from scripts.build_dataset import split_samples
+from scripts.data.build_dataset import split_samples
 
 
 class SampleSplitTest(unittest.TestCase):

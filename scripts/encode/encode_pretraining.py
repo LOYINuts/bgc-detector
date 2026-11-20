@@ -4,17 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import torch
 
 from bgc_detector.checkpoint import file_fingerprint, runtime_metadata
-from scripts.build_pretraining_data import protein_sequence, sequence_id
+from scripts.data.build_pretraining_data import protein_sequence, sequence_id
 
 
 def reuse_embeddings(proteins, reuse_catalog, reuse_embeddings_path, array):
@@ -169,7 +167,7 @@ def main():
         flush=True,
     )
     if pending:
-        from scripts.encode import load_model, pool_batch
+        from scripts.encode.encode import load_model, pool_batch
 
         device = torch.device(a.device)
         if device.type == "cuda":

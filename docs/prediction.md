@@ -30,7 +30,7 @@
 
 ## 与评测一致
 
-GenBank 解析和窗口打分只有一份实现（`bgc_detector/predict.py`），`scripts/eval_ng.py` 与 CLI
+GenBank 解析和窗口打分只有一份实现（`bgc_detector/predict.py`），`scripts/eval/eval_ng.py` 与 CLI
 都调用它。核对条件：seed 1506 checkpoint、NG 九基因组、同一份 NG embedding、`--threshold checkpoint`。
 
 | 项 | 结果 |
@@ -49,10 +49,10 @@ GenBank 解析和窗口打分只有一份实现（`bgc_detector/predict.py`）�
 
 ESMC-300M 用 `esm` 包的 `EsmcModel` 加载（`my-bgc-v2/scripts/encode.py` 里的原版写法），
 bf16，与训练时那份嵌入同源。注意不要用 transformers 的 ESMC：对这份 checkpoint 它会按自己
-的默认几何建出 2560 宽、80 层模型，权重全部 MISSING（`scripts/check_esmc.py` 会直接判定
+的默认几何建出 2560 宽、80 层模型，权重全部 MISSING（`scripts.tools.check_esmc` 会直接判定
 不可用）。
 
-用 `scripts/check_esmc.py` 复核（8 个 NG 基因，`esm` 3.5.0 + 本地权重）：
+用 `scripts.tools.check_esmc` 复核（8 个 NG 基因，`esm` 3.5.0 + 本地权重）：
 
 | 项 | 值 |
 | --- | --- |
@@ -66,7 +66,7 @@ bf16，与训练时那份嵌入同源。注意不要用 transformers 的 ESMC：
 
 走过一次回头路记在这里：一开始用 transformers 的 `AutoModel` 加载同一份权重，它按自己的默认
 几何建出 2560 宽 / 80 层，checkpoint 的键全部 `UNEXPECTED`、模型侧全部 `MISSING`；命令行
-`--threshold` 之外的输出看起来都正常，嵌入却是随机的。`scripts/check_esmc.py` 就是防这个的
+`--threshold` 之外的输出看起来都正常，嵌入却是随机的。`scripts.tools.check_esmc` 就是防这个的
 回归检查。
 
 ## 端到端检查

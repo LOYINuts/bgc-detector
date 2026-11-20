@@ -7,12 +7,10 @@ import hashlib
 import json
 import random
 import sqlite3
-import sys
 from collections import Counter
 from contextlib import closing
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pyarrow as pa
 import pyarrow.parquet as pq
 from Bio import SeqIO
