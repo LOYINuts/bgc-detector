@@ -56,13 +56,11 @@ bf16，与训练时那份嵌入同源。注意不要用 transformers 的 ESMC：
 
 | 项 | 值 |
 | --- | --- |
-| max abs diff | 0.0039 |
-| 平均 abs diff | 1.8e-3 |
-| 训练期参考（fp32 路线） | max 0.0037 / mean 1.5e-4 |
+| 8 个 NG 基因的 max abs diff | **0**（与自动产出的 parquet 逐位相同） |
+| 同一权重走 transformers 路线重算 | max 0.0037（旧实验记录的对照值） |
 
-差值都是 bf16 的量化台阶（0.00098 的整数倍），判定为可用。
-
-差值都是 bf16 的量化台阶（0.00098 的整数倍），预测够用，但不是逐位相同。
+用 `esm` 包的 `EsmcModel` 与产出冻结 parquet 的路径完全一致，所以在同一块 GPU 上重算
+与训练时用的嵌入逐位相同；换 GPU 或换内核实现会有 bf16 量级的差（约 4e-3）。
 
 走过一次回头路记在这里：一开始用 transformers 的 `AutoModel` 加载同一份权重，它按自己的默认
 几何建出 2560 宽 / 80 层，checkpoint 的键全部 `UNEXPECTED`、模型侧全部 `MISSING`；命令行

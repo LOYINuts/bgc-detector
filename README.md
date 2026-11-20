@@ -17,7 +17,8 @@ uv sync --locked          # Python 3.12，全部依赖（含 esm）
 hf download biohub/ESMC-300M
 ```
 
-离线机器用本地缓存即可，加 `HF_HUB_OFFLINE=1`，缺失就直接报错、不会偷偷联网。
+离线机器用本地缓存即可，加 `HF_HUB_OFFLINE=1`，缺失就直接报错、不会偷偷联网。完全断网时
+`uv run` 可能卡在解析上，环境已同步过就用 `uv run --no-sync ...` 跳过这一步。
 
 ## 用法
 
@@ -131,7 +132,7 @@ tests/     uv run python -m unittest discover -s tests
 ## 注意
 
 - 窗口依赖相邻基因，短 contig 用尾部环绕补齐；单基因证据不进入模型
-- 现算嵌入是 bf16，与训练时的冻结 parquet 有约 4e-3 的差（量化台阶），预测可用但不逐位相同；
-  `uv run python -m scripts.tools.check_esmc` 可复核
+- 现算嵌入是 bf16：在与产出 parquet 相同的机器/GPU 上逐位相同（8 个 NG 基因
+  max|Δ| = 0），换 GPU 可能有 4e-3 量级的差；`uv run python -m scripts.tools.check_esmc` 复核
 - 判定阈值随 seed 变化（本例 0.69–0.79），报告指标时写清用的是哪一个；同一 checkpoint 在
   NG 上默认 0.5 得 MCC 0.5855，验证阈值得 0.5988
